@@ -83,6 +83,38 @@ def read_all_markdown_sources() -> str:
     return "\n".join(all_content)
 
 
+DETAIL_LIST_FIELDS = [
+    "tools",
+    "features",
+    "artifacts",
+    "people_or_teams",
+    "decisions",
+    "blockers",
+    "grouping_hints",
+]
+
+
+def normalize_string_list(value) -> list[str]:
+    """Normalize model-provided metadata lists while dropping empty items."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def normalize_detail_fields(item: dict) -> dict:
+    """Preserve optional evidence fields that help downstream story generation."""
+    details = {}
+    if item.get("details"):
+        details["details"] = str(item["details"]).strip()
+    for field in DETAIL_LIST_FIELDS:
+        values = normalize_string_list(item.get(field))
+        if values:
+            details[field] = values
+    return details
+
+
 def normalize_storyboard(storyboard, theme_title: str, fallback_sources):
     """Keep the frontend contract stable even if the model omits optional fields."""
     fallback_source = fallback_sources[0] if fallback_sources else "unknown"
@@ -98,6 +130,7 @@ def normalize_storyboard(storyboard, theme_title: str, fallback_sources):
             "source": str(event.get("source") or fallback_source).strip(),
             "relation": event_relation,
             "confirmed": bool(event.get("confirmed", True)),
+            **normalize_detail_fields(event),
             **({"discrepancy": str(event["discrepancy"]).strip()} if event.get("discrepancy") else {}),
         }
 
@@ -135,6 +168,7 @@ def normalize_storyboard(storyboard, theme_title: str, fallback_sources):
                 normalized.append({
                     "text": text,
                     **({"source": str(source).strip()} if source else {}),
+                    **(normalize_detail_fields(item) if isinstance(item, dict) else {}),
                 })
         return normalized
 
@@ -176,7 +210,7 @@ def run_summarizer():
 
     system_prompt = """You are a storyboard aggregation engine for a builder's weekly work activity.
 
-Your job is to ingest labeled data sources and transform them into a comprehensive set of content themes covering every interesting thing the builder did that week. Each theme must include a structured narrative storyboard: a clear, ordered chain of events that builds logically from raw code sessions, Slack conversations, and meeting notes.
+Your job is to ingest labeled data sources and transform them into a comprehensive, evidence-rich set of content themes covering every interesting thing the builder did that week. Each theme must include a structured narrative storyboard: a clear, ordered chain of events that builds logically from raw code sessions, Slack conversations, and meeting notes.
 
 Input handling rules:
 - Treat each `--- SOURCE: type | filename ---` block as a labeled source.
@@ -197,9 +231,17 @@ Theme selection rules:
 - `sources` is an array of source filenames used by the theme.
 - `suggested_formats` uses values from ["video", "post", "thread", "carousel"].
 
+Specificity rules:
+- Be concrete enough that a second LLM can group related work into storyboard features without rereading the raw sources.
+- Name exact tools, systems, vendors, models, APIs, routes, components, files, commands, env vars, data folders, UI labels, and feature names when the sources mention them.
+- Explain what changed, what was added, what was removed, what was debugged, and what decision was made. Avoid vague wording like "worked on the app" when the source says what part changed.
+- Capture relationships between events using `grouping_hints`: shared feature area, same bug, same launch path, same API, same UI surface, same data source, same decision thread, or cause/effect.
+- Do not invent names or implementation details. If a detail is implied but not explicit, include it only in `details` with cautious wording and set `confirmed` to false when appropriate.
+- Prefer specific nouns over generic categories: use "app/api/sync/route.ts", "context/granola", "XAI_MODEL", "Slack MCP server", or "PreviewPanel" if present in sources.
+
 Storyboard rules:
 - Use present tense for event text.
-- Each event is one discrete event, under 20 words.
+- Each event is one discrete event. Keep `text` concise but specific, and put supporting evidence in `details` and metadata fields.
 - Use `relation: "root"` for the first event in a phase, `relation: "next"` for chained events, and `relation: "parallel"` for concurrent events.
 - Attribute every event and turning point to a source filename.
 - Group events into phases only when the story spans distinct stages.
@@ -207,6 +249,16 @@ Storyboard rules:
 - Include 2-4 key turning points.
 - Include unresolved items, gaps, or missing data in `open_threads`.
 - Include a one-paragraph `narrative_summary` after the structured storyboard fields.
+
+Optional detail fields:
+- `details`: 1-3 sentences with concrete evidence and implementation specifics.
+- `tools`: tools, services, frameworks, models, MCP servers, SDKs, or commands involved.
+- `features`: product or system capabilities affected.
+- `artifacts`: files, routes, components, functions, folders, env vars, docs, channels, meetings, or named assets.
+- `people_or_teams`: people, teams, Slack users, or stakeholder groups mentioned.
+- `decisions`: specific decisions, tradeoffs, approvals, or rejected approaches.
+- `blockers`: errors, missing data, ambiguity, setup problems, or unresolved constraints.
+- `grouping_hints`: labels that help connect this event to related events in other themes or phases.
 
 Return ONLY valid JSON, no preamble, no markdown fences. Use exactly this top-level shape:
 {
@@ -218,6 +270,14 @@ Return ONLY valid JSON, no preamble, no markdown fences. Use exactly this top-le
       "content_angle": "Why outsiders should care.",
       "sources": ["source_filename"],
       "suggested_formats": ["video"],
+      "details": "Specific implementation context and evidence for this theme.",
+      "tools": ["Tool or system name"],
+      "features": ["Feature or capability name"],
+      "artifacts": ["file_or_route_or_component"],
+      "people_or_teams": ["person_or_team"],
+      "decisions": ["Specific decision or tradeoff"],
+      "blockers": ["Specific blocker or missing piece"],
+      "grouping_hints": ["shared_feature_area_or_story_thread"],
       "storyboard": {
         "title": "Inferred story title",
         "overview": "One or two sentences summarizing the full arc.",
@@ -229,7 +289,15 @@ Return ONLY valid JSON, no preamble, no markdown fences. Use exactly this top-le
                 "text": "Builder identifies the blocking issue",
                 "source": "source_filename",
                 "relation": "root",
-                "confirmed": true
+                "confirmed": true,
+                "details": "Specific evidence: what was inspected, changed, tested, or decided.",
+                "tools": ["Tool or system name"],
+                "features": ["Feature or capability name"],
+                "artifacts": ["file_or_route_or_component"],
+                "people_or_teams": ["person_or_team"],
+                "decisions": ["Specific decision or tradeoff"],
+                "blockers": ["Specific blocker or missing piece"],
+                "grouping_hints": ["shared_feature_area_or_story_thread"]
               }
             ]
           }
@@ -319,6 +387,7 @@ Generate the weekly brief in JSON format."""
             for fmt in theme["suggested_formats"]
             if str(fmt).strip()
         ] or ["video"]
+        theme.update(normalize_detail_fields(theme))
         theme["storyboard"] = normalize_storyboard(
             theme.get("storyboard"),
             theme["title"],

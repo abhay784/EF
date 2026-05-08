@@ -2,7 +2,18 @@ export type Format = "post" | "thread" | "video" | "carousel";
 
 export type StoryboardEventRelation = "root" | "next" | "parallel";
 
-export interface StoryboardEvent {
+export interface EvidenceMetadata {
+  details?: string;
+  tools?: string[];
+  features?: string[];
+  artifacts?: string[];
+  people_or_teams?: string[];
+  decisions?: string[];
+  blockers?: string[];
+  grouping_hints?: string[];
+}
+
+export interface StoryboardEvent extends EvidenceMetadata {
   text: string;
   source: string;
   relation: StoryboardEventRelation;
@@ -15,12 +26,12 @@ export interface StoryboardPhase {
   events: StoryboardEvent[];
 }
 
-export interface StoryboardTurningPoint {
+export interface StoryboardTurningPoint extends EvidenceMetadata {
   text: string;
   source: string;
 }
 
-export interface StoryboardOpenThread {
+export interface StoryboardOpenThread extends EvidenceMetadata {
   text: string;
   source?: string;
 }
@@ -35,7 +46,7 @@ export interface Storyboard {
   narrative_summary: string;
 }
 
-export interface Theme {
+export interface Theme extends EvidenceMetadata {
   title: string;
   one_liner: string;
   content_angle: string;
