@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import PreviewPanel from "@/components/PreviewPanel";
 import { ChevronLeft, ChevronRight, Settings, Calendar, Slack, Code } from "@/components/Icons";
-import type { WeeklyBrief, VideoScript, Theme, Format } from "@/lib/types";
+import type { WeeklyBrief, VideoScript, Theme } from "@/lib/types";
 
 function getWeekLabel() {
   const now = new Date();
@@ -27,9 +27,10 @@ interface TopBarProps {
   brief: WeeklyBrief | null;
   isSyncing: boolean;
   onSync: () => void;
+  slackConnected: boolean;
 }
 
-function TopBar({ brief, isSyncing, onSync }: TopBarProps) {
+function TopBar({ brief, isSyncing, onSync, slackConnected }: TopBarProps) {
   const { range, label } = getWeekLabel();
 
   return (
@@ -74,10 +75,19 @@ function TopBar({ brief, isSyncing, onSync }: TopBarProps) {
             <span className="pill-dot" />
             <Calendar size={11} /> granola · {brief ? brief.themes.length : 0}
           </span>
-          <span className="pill">
+          <button
+            type="button"
+            className="pill"
+            onClick={() => {
+              if (slackConnected) return;
+              window.open("/api/slack/install", "_blank", "noopener,noreferrer");
+            }}
+            title={slackConnected ? "Slack connected" : "Click to connect Slack"}
+            style={{ cursor: slackConnected ? "default" : "pointer", border: 0, font: "inherit" }}
+          >
             <span className="pill-dot" />
             <Slack size={11} /> slack
-          </span>
+          </button>
           <span className={"pill" + (!brief ? " warn" : "")}>
             <span className="pill-dot" />
             <Code size={11} /> code
@@ -99,13 +109,26 @@ export default function StudioPage() {
   const [script, setScript] = useState<VideoScript | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [format, setFormat] = useState<Format>("post");
   const [activeTheme, setActiveTheme] = useState<Theme | null>(null);
   const [isRefining, setIsRefining] = useState(false);
+  const [slackConnected, setSlackConnected] = useState(false);
 
   useEffect(() => {
     fetchBrief();
+    fetchSlackStatus();
   }, []);
+
+  const fetchSlackStatus = async () => {
+    try {
+      const res = await fetch("/api/slack/status");
+      if (res.ok) {
+        const data = await res.json();
+        setSlackConnected(Boolean(data.connected));
+      }
+    } catch {
+      // status stays false
+    }
+  };
 
   const fetchBrief = async () => {
     try {
@@ -128,7 +151,7 @@ export default function StudioPage() {
 
   return (
     <div className="app">
-      <TopBar brief={brief} isSyncing={isSyncing} onSync={handleSync} />
+      <TopBar brief={brief} isSyncing={isSyncing} onSync={handleSync} slackConnected={slackConnected} />
       <div className="main">
         <ChatPanel
           brief={brief}
@@ -136,14 +159,11 @@ export default function StudioPage() {
           onLoadingChange={setIsLoading}
           onActiveThemeChange={setActiveTheme}
           onRefiningChange={setIsRefining}
-          onFormatSuggest={setFormat}
           isSyncing={isSyncing}
         />
         <PreviewPanel
           script={script}
           isLoading={isLoading}
-          format={format}
-          setFormat={setFormat}
           activeTheme={activeTheme}
           isRefining={isRefining}
         />

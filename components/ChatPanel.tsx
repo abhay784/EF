@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import ThemeChip from "./ThemeChip";
 import { Sparkle, Paperclip, Link, Mic, Send, X, Doc, ImageIcon, Link as LinkIcon } from "@/components/Icons";
-import type { WeeklyBrief, Theme, ChatMessage, VideoScript, Format } from "@/lib/types";
+import type { WeeklyBrief, Theme, ChatMessage, VideoScript } from "@/lib/types";
 
 interface Attachment {
   name: string;
@@ -16,7 +16,6 @@ interface ChatPanelProps {
   onLoadingChange: (loading: boolean) => void;
   onActiveThemeChange: (theme: Theme | null) => void;
   onRefiningChange: (refining: boolean) => void;
-  onFormatSuggest?: (format: Format) => void;
   isSyncing: boolean;
 }
 
@@ -46,7 +45,6 @@ export default function ChatPanel({
   onLoadingChange,
   onActiveThemeChange,
   onRefiningChange,
-  onFormatSuggest,
   isSyncing,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -72,8 +70,14 @@ export default function ChatPanel({
   };
 
   const sendMessage = useCallback(
-    async (text: string) => {
-      if (!text.trim() || !brief || !activeTheme) return;
+    async (text: string, themeOverride?: Theme) => {
+      if (!text.trim() || !brief) return;
+
+      const themeForRequest = themeOverride ?? activeTheme ?? brief.themes[0] ?? null;
+      if (!themeForRequest) return;
+      if (!activeTheme || activeTheme.title !== themeForRequest.title) {
+        setTheme(themeForRequest);
+      }
 
       const isFirstMsg = messages.length === 0;
       const newMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
@@ -89,7 +93,7 @@ export default function ChatPanel({
         const response = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ theme: activeTheme, messages: newMessages, brief }),
+          body: JSON.stringify({ theme: themeForRequest, messages: newMessages, brief }),
         });
 
         const reader = response.body?.getReader();
@@ -140,11 +144,10 @@ export default function ChatPanel({
     setMessages([]);
     onScriptUpdate(null);
     onRefiningChange(false);
-    if (onFormatSuggest && theme.suggested_formats.length > 0) {
-      const fmt = theme.suggested_formats[0] as Format;
-      if (["post", "thread", "video", "carousel"].includes(fmt)) onFormatSuggest(fmt);
-    }
-    sendMessage(`Write short-form content about: ${theme.title}. Angle: ${theme.content_angle}`);
+    sendMessage(
+      `Write short-form content about: ${theme.title}. Angle: ${theme.content_angle}`,
+      theme
+    );
   };
 
   const handleSend = () => {
@@ -259,8 +262,8 @@ export default function ChatPanel({
             <ClaudeMsg key={idx}>
               <div className="msg-name">Claude · drafting</div>
               <p>
-                On it. Pulling from your sources — I&apos;ve drafted content in the panel on the right.
-                Switch formats to see post, thread, video script, or carousel — they share the same beats.
+                On it. Pulling from your sources — I&apos;ve drafted the script on the right.
+                Tell me what to tighten — hook, middle, or CTA.
               </p>
             </ClaudeMsg>
           );

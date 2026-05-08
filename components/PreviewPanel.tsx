@@ -1,75 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  PostIcon, ThreadIcon, VideoIcon, CarouselIcon,
-  Refresh, Copy, NotionIcon, Download, Sparkle,
-} from "@/components/Icons";
+import { Refresh, Copy, NotionIcon, Download, Sparkle } from "@/components/Icons";
 import { spokenSeconds } from "@/lib/utils";
-import type { VideoScript, Theme, Format } from "@/lib/types";
+import type { VideoScript, Theme } from "@/lib/types";
 
 interface PreviewPanelProps {
   script: VideoScript | null;
   isLoading: boolean;
-  format: Format;
-  setFormat: (f: Format) => void;
   activeTheme: Theme | null;
   isRefining: boolean;
-}
-
-function PostView({ script }: { script: VideoScript }) {
-  const body = `${script.hook}\n\n${script.middle}\n\n${script.cta}`;
-  const chars = body.length;
-  const limit = 3000;
-  const pct = Math.min(100, (chars / limit) * 100);
-  return (
-    <div className="post">
-      <div className="post-author">
-        <div className="post-avatar">AB</div>
-        <div className="post-author-info">
-          <div className="post-author-name">You</div>
-          <div className="post-author-sub">builder · 1st</div>
-        </div>
-      </div>
-      <div className="post-body">{body}</div>
-      <div className="post-footer">
-        <div className="char-count">
-          <span>{chars} / {limit}</span>
-          <span className="char-bar"><i style={{ width: pct + "%" }} /></span>
-        </div>
-        <span>LINKEDIN · LONG-FORM</span>
-      </div>
-    </div>
-  );
-}
-
-function ThreadView({ script }: { script: VideoScript }) {
-  const tweets = [script.hook, script.middle, script.cta];
-  const labels = ["HOOK", "BEAT", "CTA"];
-  return (
-    <div className="thread">
-      {tweets.map((copy, i) => (
-        <div key={i} className="tweet">
-          <div className="tweet-rail">
-            <div className="av">AB</div>
-            <div className="line" />
-          </div>
-          <div className="tweet-body">
-            <div className="tweet-head">
-              <span className="name">You</span>
-              <span className="handle">@you</span>
-              <span className="pos">{i + 1}/{tweets.length}</span>
-            </div>
-            <div className="tweet-copy">{copy}</div>
-            <div className="tweet-foot">
-              <span className="cc">{copy.length} / 280</span>
-              <span>{labels[i]}</span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function VideoView({ script }: { script: VideoScript }) {
@@ -107,32 +47,6 @@ function VideoView({ script }: { script: VideoScript }) {
   );
 }
 
-function CarouselView({ script, theme }: { script: VideoScript; theme: Theme | null }) {
-  const coverTitle = theme?.title ?? "This week's story";
-  const slides = [
-    { kind: "cover", title: coverTitle, body: script.hook, meta: "01 / 04" },
-    { title: "The setup", body: script.hook, meta: "02 / 04" },
-    { title: "The insight", body: script.middle, meta: "03 / 04" },
-    { kind: "last", title: "Take action", body: script.cta, meta: "04 / 04" },
-  ];
-  return (
-    <div className="carousel">
-      {slides.map((s, i) => (
-        <div key={i} className={"slide" + (s.kind === "cover" ? " cover" : "") + (s.kind === "last" ? " last" : "")}>
-          <div className="slide-num">{s.meta}</div>
-          <div>
-            <div className="slide-title">{s.title}</div>
-            <div className="slide-body">{s.body}</div>
-          </div>
-          <div className="slide-meta">
-            {i === 0 ? "INSTAGRAM · COVER" : i === slides.length - 1 ? "INSTAGRAM · CLOSE" : "INSTAGRAM · BODY"}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function BuildingView() {
   return (
     <div className="frames">
@@ -156,18 +70,9 @@ function BuildingView() {
   );
 }
 
-const FORMAT_TABS = [
-  { id: "post" as Format, label: "Post", Icon: PostIcon },
-  { id: "thread" as Format, label: "Thread", Icon: ThreadIcon },
-  { id: "video" as Format, label: "Video", Icon: VideoIcon },
-  { id: "carousel" as Format, label: "Carousel", Icon: CarouselIcon },
-];
-
 export default function PreviewPanel({
   script,
   isLoading,
-  format,
-  setFormat,
   activeTheme,
   isRefining,
 }: PreviewPanelProps) {
@@ -181,7 +86,7 @@ export default function PreviewPanel({
     }
     const t = setTimeout(() => setBuilding(false), 400);
     return () => clearTimeout(t);
-  }, [isLoading, format]);
+  }, [isLoading]);
 
   const handleCopy = () => {
     if (!script) return;
@@ -196,13 +101,6 @@ export default function PreviewPanel({
   return (
     <div className="preview">
       <div className="preview-bar">
-        <div className="format-tabs">
-          {FORMAT_TABS.map(({ id, label, Icon }) => (
-            <button key={id} aria-pressed={format === id} onClick={() => setFormat(id)}>
-              <Icon size={13} /> {label}
-            </button>
-          ))}
-        </div>
         <div className="preview-actions">
           <button className="ghost-btn"><Refresh size={13} /> Regenerate</button>
           <button className="ghost-btn" onClick={handleCopy}>
@@ -220,8 +118,8 @@ export default function PreviewPanel({
               <div className="empty-art" />
               <h3>Pick an angle to start drafting</h3>
               <p>
-                The right panel becomes a live storyboard. Switch formats anytime —
-                beats stay aligned across post, thread, video and carousel.
+                The right panel becomes a live storyboard for your video script —
+                hook, middle, and CTA, timed for short-form.
               </p>
             </div>
           </div>
@@ -233,7 +131,7 @@ export default function PreviewPanel({
                   <em>"{activeTheme?.title ?? "Your story"}"</em>
                 </div>
                 <div className="preview-meta">
-                  <div className="v">{format.toUpperCase()} · DRAFT v{isRefining ? 2 : 1}</div>
+                  <div className="v">VIDEO SCRIPT · DRAFT v{isRefining ? 2 : 1}</div>
                   {activeTheme && <div>{activeTheme.sources.slice(0, 2).join(" · ")}</div>}
                   <div>SAVED JUST NOW</div>
                 </div>
@@ -242,19 +140,14 @@ export default function PreviewPanel({
 
             {isRefining && script && (
               <div className="refinement-note">
-                <Sparkle size={12} /> Updated · hook reordered across all formats
+                <Sparkle size={12} /> Updated · hook reordered
               </div>
             )}
 
             {building ? (
               <BuildingView />
             ) : script ? (
-              <>
-                {format === "post" && <PostView script={script} />}
-                {format === "thread" && <ThreadView script={script} />}
-                {format === "video" && <VideoView script={script} />}
-                {format === "carousel" && <CarouselView script={script} theme={activeTheme} />}
-              </>
+              <VideoView script={script} />
             ) : null}
           </>
         )}
