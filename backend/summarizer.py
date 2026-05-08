@@ -3,11 +3,9 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
-from urllib import error, request
+from urllib import request
 
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-QWEN_MODEL = "qwen3:8b"
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4-fast-non-reasoning")
 XAI_URL = "https://api.x.ai/v1/chat/completions"
@@ -28,32 +26,11 @@ def post_json(url: str, payload: dict, headers=None) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def call_qwen(system: str, user_message: str) -> str:
-    """Call Qwen 3 via Ollama's OpenAI-compatible endpoint."""
-    try:
-        response = post_json(
-            OLLAMA_URL,
-            {
-                "model": QWEN_MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_message},
-                ],
-                "temperature": 0.3,
-                "stream": False,
-            }
-        )
-        return response["choices"][0]["message"]["content"]
-    except error.URLError as e:
-        raise RuntimeError(
-            f"Ollama call failed. Start it with `ollama serve` if it is not running. Details: {e}"
-        )
-    except Exception as e:
-        raise RuntimeError(f"Ollama call failed: {e}")
-
-
 def call_xai(system: str, user_message: str) -> str:
-    """Fallback: Call Grok via xAI's OpenAI-compatible endpoint."""
+    """Call Grok via xAI's OpenAI-compatible endpoint."""
+    if not XAI_API_KEY:
+        raise RuntimeError("XAI_API_KEY is required for Grok summarization")
+
     try:
         response = post_json(
             XAI_URL,
@@ -295,18 +272,9 @@ Here is the raw builder activity:
 
 Generate the weekly brief in JSON format."""
 
-    print("  Calling LLM to summarize...")
-    try:
-        raw_response = call_qwen(system_prompt, user_message)
-        print("  ✓ Qwen summarization complete")
-    except RuntimeError as e:
-        print(f"  [warn] {e}")
-        if XAI_API_KEY:
-            print(f"  Falling back to xAI ({XAI_MODEL})...")
-            raw_response = call_xai(system_prompt, user_message)
-            print("  ✓ xAI summarization complete")
-        else:
-            raise
+    print(f"  Calling Grok ({XAI_MODEL}) to summarize...")
+    raw_response = call_xai(system_prompt, user_message)
+    print("  ✓ Grok summarization complete")
 
     json_text = raw_response.strip()
     if json_text.startswith("```"):
