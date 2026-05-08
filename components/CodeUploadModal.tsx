@@ -12,14 +12,30 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  target?: "uploads" | "granola";
+  title?: string;
+  description?: string;
 }
 
-export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
+export default function CodeUploadModal({
+  open,
+  onClose,
+  onSaved,
+  target = "uploads",
+  title = "Add Claude / code context",
+  description,
+}: Props) {
   const [pasteText, setPasteText] = useState("");
   const [pasteName, setPasteName] = useState("");
   const [existing, setExisting] = useState<UploadedFile[]>([]);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const apiUrl = `/api/uploads?target=${encodeURIComponent(target)}`;
+  const folderLabel = `context/${target}/`;
+  const desc =
+    description ||
+    `Paste markdown or upload .md files. Saved to ${folderLabel} and pulled into the next sync.`;
 
   useEffect(() => {
     if (open) refreshList();
@@ -27,7 +43,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
 
   const refreshList = async () => {
     try {
-      const res = await fetch("/api/code/upload");
+      const res = await fetch(apiUrl);
       const data = await res.json();
       setExisting(data.files || []);
     } catch {
@@ -40,19 +56,19 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
     setBusy(true);
     try {
       const name = pasteName.trim() || `paste_${Date.now()}`;
-      const res = await fetch("/api/code/upload", {
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ files: [{ name, content: pasteText }] }),
       });
       if (!res.ok) throw new Error(`upload failed: ${res.status}`);
-      console.log("[code-upload] saved paste:", name);
+      console.log(`[upload-${target}] saved paste:`, name);
       setPasteText("");
       setPasteName("");
       await refreshList();
       onSaved();
     } catch (e) {
-      console.error("[code-upload]", e);
+      console.error(`[upload-${target}]`, e);
       alert("Save failed. Check console.");
     } finally {
       setBusy(false);
@@ -69,19 +85,19 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
           content: await f.text(),
         }))
       );
-      const res = await fetch("/api/code/upload", {
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ files }),
       });
       if (!res.ok) throw new Error(`upload failed: ${res.status}`);
       const data = await res.json();
-      console.log("[code-upload] saved files:", data.written);
+      console.log(`[upload-${target}] saved files:`, data.written);
       if (fileInput.current) fileInput.current.value = "";
       await refreshList();
       onSaved();
     } catch (e) {
-      console.error("[code-upload]", e);
+      console.error(`[upload-${target}]`, e);
       alert("Upload failed. Check console.");
     } finally {
       setBusy(false);
@@ -117,7 +133,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Add Claude / code context</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
           <button
             onClick={onClose}
             style={{ background: "transparent", border: 0, fontSize: 18, cursor: "pointer", color: "var(--ink-2)" }}
@@ -127,9 +143,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
           </button>
         </div>
 
-        <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>
-          Paste a CLAUDE.md, session notes, or any markdown. Files save to <code>context/uploads/</code> and feed the next sync.
-        </p>
+        <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>{desc}</p>
 
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 12, color: "var(--ink-2)", display: "block", marginBottom: 4 }}>Filename (optional)</label>
@@ -137,7 +151,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
             type="text"
             value={pasteName}
             onChange={(e) => setPasteName(e.target.value)}
-            placeholder="e.g. session-notes.md"
+            placeholder={target === "granola" ? "e.g. q3-planning-meeting.md" : "e.g. session-notes.md"}
             style={{
               width: "100%",
               padding: "8px 10px",
@@ -155,7 +169,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
         <textarea
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
-          placeholder="Paste markdown content here…"
+          placeholder={target === "granola" ? "Paste a Granola meeting export here…" : "Paste markdown content here…"}
           style={{
             width: "100%",
             minHeight: 180,
@@ -217,7 +231,7 @@ export default function CodeUploadModal({ open, onClose, onSaved }: Props) {
         {existing.length > 0 && (
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--hair)" }}>
             <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 8 }}>
-              {existing.length} file{existing.length === 1 ? "" : "s"} in context/uploads/
+              {existing.length} file{existing.length === 1 ? "" : "s"} in {folderLabel}
             </div>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 12, fontFamily: '"Geist Mono", monospace' }}>
               {existing.map((f) => (

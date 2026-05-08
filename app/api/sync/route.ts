@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { spawn } from "child_process";
 import path from "path";
 import { getInstall } from "@/lib/slackStore";
+import { getGranolaConnection } from "@/lib/granolaStore";
 
 interface ScriptResult {
   code: number;
@@ -36,6 +37,7 @@ export async function POST() {
 
   const teamId = cookies().get("slack_team_id")?.value;
   const install = teamId ? await getInstall(teamId) : null;
+  const granola = await getGranolaConnection();
 
   const env = {
     ...process.env,
@@ -44,6 +46,7 @@ export async function POST() {
     XAI_MODEL: process.env.XAI_MODEL || "",
     SLACK_BOT_TOKEN: install?.accessToken || process.env.SLACK_BOT_TOKEN || "",
     SLACK_TEAM_ID: install?.teamId || process.env.SLACK_TEAM_ID || "",
+    GRANOLA_API_KEY: granola?.apiKey || process.env.GRANOLA_API_KEY || "",
   };
 
   const logs: string[] = [];

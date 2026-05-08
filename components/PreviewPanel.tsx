@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Refresh, Copy, NotionIcon, Download, Sparkle } from "@/components/Icons";
+import { Refresh, Copy, Download, Sparkle } from "@/components/Icons";
 import { spokenSeconds } from "@/lib/utils";
 import type { VideoScript, Theme } from "@/lib/types";
 
@@ -106,7 +106,6 @@ export default function PreviewPanel({
           <button className="ghost-btn" onClick={handleCopy}>
             <Copy size={13} /> {copied ? "Copied!" : "Copy"}
           </button>
-          <button className="ghost-btn"><NotionIcon size={13} /> Notion</button>
           <button className="ghost-btn primary"><Download size={13} /> Export</button>
         </div>
       </div>
