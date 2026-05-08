@@ -1,3 +1,5 @@
+export type Format = "post" | "thread" | "video" | "carousel";
+
 export interface Theme {
   title: string;
   one_liner: string;

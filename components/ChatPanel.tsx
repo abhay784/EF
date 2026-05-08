@@ -1,53 +1,95 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import ThemeChip from "./ThemeChip";
-import type { WeeklyBrief, Theme, ChatMessage, VideoScript } from "@/lib/types";
+import { Sparkle, Paperclip, Link, Mic, Send, X, Doc, ImageIcon, Link as LinkIcon } from "@/components/Icons";
+import type { WeeklyBrief, Theme, ChatMessage, VideoScript, Format } from "@/lib/types";
+
+interface Attachment {
+  name: string;
+  kind: "doc" | "image" | "link";
+}
 
 interface ChatPanelProps {
   brief: WeeklyBrief | null;
   onScriptUpdate: (script: VideoScript | null) => void;
   onLoadingChange: (loading: boolean) => void;
+  onActiveThemeChange: (theme: Theme | null) => void;
+  onRefiningChange: (refining: boolean) => void;
+  onFormatSuggest?: (format: Format) => void;
+  isSyncing: boolean;
+}
+
+function ClaudeMsg({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="msg">
+      <div className="msg-avatar claude">C</div>
+      <div className="msg-body">{children}</div>
+    </div>
+  );
+}
+
+function UserMsg({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="msg" style={{ flexDirection: "row-reverse" }}>
+      <div className="msg-avatar">AB</div>
+      <div className="msg-body" style={{ maxWidth: "82%" }}>
+        <div className="user-msg">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function ChatPanel({
   brief,
   onScriptUpdate,
   onLoadingChange,
+  onActiveThemeChange,
+  onRefiningChange,
+  onFormatSuggest,
+  isSyncing,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTheme, setActiveTheme] = useState<Theme | null>(null);
+  const [pickedAngleId, setPickedAngleId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dropping, setDropping] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
+  const setTheme = (theme: Theme | null) => {
+    setActiveTheme(theme);
+    onActiveThemeChange(theme);
   };
 
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || !brief || !activeTheme) return;
 
-      const newMessages: ChatMessage[] = [
-        ...messages,
-        { role: "user", content: text },
-      ];
+      const isFirstMsg = messages.length === 0;
+      const newMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
       setMessages(newMessages);
       setInput("");
+      if (taRef.current) taRef.current.style.height = "auto";
       setIsLoading(true);
       onLoadingChange(true);
+      if (!isFirstMsg) onRefiningChange(false);
       onScriptUpdate(null);
 
       try {
         const response = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            theme: activeTheme,
-            messages: newMessages,
-            brief,
-          }),
+          body: JSON.stringify({ theme: activeTheme, messages: newMessages, brief }),
         });
 
         const reader = response.body?.getReader();
@@ -59,20 +101,15 @@ export default function ChatPanel({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const chunk = decoder.decode(value);
-          const lines = chunk.split("\n\n").filter((l) => l.startsWith("data: "));
-
-          for (const line of lines) {
+          for (const line of chunk.split("\n\n")) {
+            if (!line.startsWith("data: ")) continue;
             const data = line.replace("data: ", "");
             if (data === "[DONE]") break;
-
             try {
               const parsed = JSON.parse(data);
-              if (parsed.text) {
-                assistantText += parsed.text;
-              }
-            } catch (e) {
+              if (parsed.text) assistantText += parsed.text;
+            } catch {
               continue;
             }
           }
@@ -81,162 +118,225 @@ export default function ChatPanel({
         try {
           const script = JSON.parse(assistantText) as VideoScript;
           onScriptUpdate(script);
+          if (!isFirstMsg) onRefiningChange(true);
         } catch {
           onScriptUpdate(null);
         }
 
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: assistantText },
-        ]);
-      } catch (error) {
-        console.error("Failed to send message:", error);
+        setMessages((prev) => [...prev, { role: "assistant", content: assistantText }]);
+      } catch (err) {
+        console.error("generate failed:", err);
       } finally {
         setIsLoading(false);
         onLoadingChange(false);
       }
-
-      setTimeout(scrollToBottom, 0);
     },
-    [messages, brief, activeTheme, onScriptUpdate, onLoadingChange]
+    [messages, brief, activeTheme, onScriptUpdate, onLoadingChange, onRefiningChange]
   );
 
-  const handleThemeSelect = (theme: Theme) => {
-    setActiveTheme(theme);
+  const handleAnglePick = (theme: Theme) => {
+    setTheme(theme);
+    setPickedAngleId(theme.title);
     setMessages([]);
     onScriptUpdate(null);
-    const firstMessage = `Write a short-form video script about: ${theme.title}. Use this angle: ${theme.content_angle}`;
-    sendMessage(firstMessage);
+    onRefiningChange(false);
+    if (onFormatSuggest && theme.suggested_formats.length > 0) {
+      const fmt = theme.suggested_formats[0] as Format;
+      if (["post", "thread", "video", "carousel"].includes(fmt)) onFormatSuggest(fmt);
+    }
+    sendMessage(`Write short-form content about: ${theme.title}. Angle: ${theme.content_angle}`);
   };
 
-  const handleSendInput = () => {
-    if (input.trim()) {
-      sendMessage(input);
-    }
+  const handleSend = () => {
+    if (input.trim()) sendMessage(input);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendInput();
-    }
+  const addAttachment = (a: Attachment) => setAttachments((prev) => [...prev, a]);
+  const removeAttachment = (i: number) => setAttachments((prev) => prev.filter((_, j) => j !== i));
+
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setDropping(true); };
+  const onDragLeave = () => setDropping(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDropping(false);
+    const f = e.dataTransfer?.files?.[0];
+    addAttachment(f
+      ? { name: f.name, kind: f.type.startsWith("image") ? "image" : "doc" }
+      : { name: "dropped-file.md", kind: "doc" });
+  };
+
+  const grow = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    e.target.style.height = "auto";
+    e.target.style.height = Math.min(140, e.target.scrollHeight) + "px";
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900 border-r border-zinc-800">
-      {/* Header */}
-      <div className="border-b border-zinc-800 p-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-100">Script Studio</h1>
-        <button className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white">
-          Sync
-        </button>
-      </div>
-
-      {/* Content area */}
-      <div className="flex-1 overflow-y-auto flex flex-col">
-        {!brief ? (
-          <div className="flex-1 flex items-center justify-center p-6 text-center">
-            <div>
-              <p className="text-zinc-400 mb-4">No brief yet</p>
-              <p className="text-sm text-zinc-500">
-                Click Sync to generate a weekly brief from your activity
+    <div className="chat">
+      <div className="chat-scroll" ref={scrollRef}>
+        <ClaudeMsg>
+          <div className="msg-name">Claude · weekly brief</div>
+          {brief ? (
+            <>
+              <div className="brief-headline">
+                You had a <em>busy</em> week. {brief.themes.length} threads I think are worth telling —
+              </div>
+              <p style={{ color: "var(--ink-2)", fontSize: "13.5px", marginBottom: "10px" }}>
+                From your activity across {brief.themes.length} themes. Tap a theme to dig in.
               </p>
-            </div>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-6">
-            <p className="text-zinc-300 text-sm mb-6 text-center">
-              Pick a theme to start writing
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center max-w-md">
-              {brief.themes.map((theme) => (
-                <ThemeChip
-                  key={theme.title}
-                  theme={theme}
-                  selected={activeTheme?.title === theme.title}
-                  onClick={handleThemeSelect}
-                />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                className={clsx(
-                  "flex gap-3 text-sm",
-                  msg.role === "user" ? "flex-row-reverse" : "flex-row"
-                )}
-              >
-                <div
-                  className={clsx(
-                    "flex-shrink-0 w-6 h-6 rounded flex items-center justify-center text-xs font-semibold",
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white"
-                      : "bg-zinc-800 text-zinc-300"
-                  )}
-                >
-                  {msg.role === "user" ? "Y" : "A"}
-                </div>
-                <div
-                  className={clsx(
-                    "flex-1 p-3 rounded-lg max-w-xs",
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white"
-                      : "bg-zinc-800 text-zinc-100"
-                  )}
-                >
-                  {msg.role === "assistant" ? (
-                    <p className="text-xs text-zinc-400">
-                      (JSON response — see storyboard)
-                    </p>
-                  ) : (
-                    msg.content
-                  )}
-                </div>
+              <div className="chips">
+                {brief.themes.map((t) => (
+                  <ThemeChip
+                    key={t.title}
+                    theme={t}
+                    selected={activeTheme?.title === t.title}
+                    onClick={() => setTheme(t)}
+                  />
+                ))}
               </div>
-            ))}
-            {isLoading && (
-              <div className="flex gap-3 text-sm">
-                <div className="flex-shrink-0 w-6 h-6 rounded flex items-center justify-center text-xs font-semibold bg-zinc-800 text-zinc-300">
-                  A
-                </div>
-                <div className="flex-1 p-3 rounded-lg bg-zinc-800 text-zinc-100">
-                  <span className="text-xs text-zinc-400">Generating...</span>
-                </div>
+              <p style={{ fontSize: "13.5px", color: "var(--ink-2)", margin: "8px 0 12px" }}>
+                Here are the angles I&apos;d lead with:
+              </p>
+              <div>
+                {brief.themes.map((theme) => (
+                  <div
+                    key={theme.title}
+                    className={"angle-card" + (pickedAngleId === theme.title ? " picked" : "")}
+                    onClick={() => !isLoading && handleAnglePick(theme)}
+                  >
+                    <div className="angle-meta">
+                      <span className="src">{theme.suggested_formats[0]?.toUpperCase() ?? "CONTENT"}</span>
+                      <span>·</span>
+                      <span>from {theme.sources.slice(0, 2).join(", ")}</span>
+                    </div>
+                    <div className="angle-title">{theme.title}</div>
+                    <div className="angle-hook">&ldquo;{theme.content_angle}&rdquo;</div>
+                    <div className="angle-actions">
+                      <button
+                        className="angle-cta"
+                        disabled={isLoading}
+                        onClick={(e) => { e.stopPropagation(); handleAnglePick(theme); }}
+                      >
+                        <Sparkle size={13} /> Make this
+                      </button>
+                      <button className="angle-secondary" onClick={(e) => e.stopPropagation()}>
+                        Try a different angle
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+            </>
+          ) : isSyncing ? (
+            <>
+              <div className="brief-headline">Syncing your week…</div>
+              <p style={{ color: "var(--ink-2)", fontSize: "13.5px" }}>
+                Reading your Claude Code sessions, Slack messages, and Granola notes.
+              </p>
+              <span className="typing"><i className="ti" /><i className="ti" /><i className="ti" /></span>
+            </>
+          ) : (
+            <>
+              <div className="brief-headline">No brief yet.</div>
+              <p style={{ color: "var(--ink-2)", fontSize: "13.5px" }}>
+                Hit <strong>Sync</strong> to read your Claude Code sessions, Slack messages, and Granola notes.
+              </p>
+            </>
+          )}
+        </ClaudeMsg>
+
+        {messages.map((msg, idx) => {
+          if (msg.role === "user") {
+            return (
+              <UserMsg key={idx}>
+                {idx === 0 && pickedAngleId ? (
+                  <><span className="tag">make this</span>{" "}{activeTheme?.title}</>
+                ) : msg.content}
+              </UserMsg>
+            );
+          }
+          return (
+            <ClaudeMsg key={idx}>
+              <div className="msg-name">Claude · drafting</div>
+              <p>
+                On it. Pulling from your sources — I&apos;ve drafted content in the panel on the right.
+                Switch formats to see post, thread, video script, or carousel — they share the same beats.
+              </p>
+            </ClaudeMsg>
+          );
+        })}
+
+        {isLoading && (
+          <ClaudeMsg>
+            <div className="msg-name">Claude · drafting</div>
+            <span className="typing"><i className="ti" /><i className="ti" /><i className="ti" /></span>
+          </ClaudeMsg>
         )}
       </div>
 
-      {/* Input area */}
-      {brief && messages.length > 0 && (
-        <div className="border-t border-zinc-800 p-4 space-y-2">
-          <input
-            type="text"
+      <div
+        className={"composer" + (dropping ? " dropping" : "")}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        <div className="composer-frame">
+          {attachments.length > 0 && (
+            <div className="attachments">
+              {attachments.map((a, i) => (
+                <span key={i} className="attachment">
+                  <span className="attachment-icon">
+                    {a.kind === "image" ? <ImageIcon size={13} /> : a.kind === "link" ? <LinkIcon size={13} /> : <Doc size={13} />}
+                  </span>
+                  <span>{a.name}</span>
+                  <span className="x" onClick={() => removeAttachment(i)}><X size={11} /></span>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={taRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask for changes... (e.g., 'make the hook punchier')"
+            onChange={grow}
+            placeholder={messages.length > 0 ? "ask claude to refine, or type a follow-up…" : "ask for a different angle, or upload context…"}
             disabled={isLoading}
-            className="w-full px-3 py-2 rounded-lg bg-zinc-800 text-zinc-100 placeholder-zinc-500 text-sm disabled:opacity-50"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
           />
-          <button
-            onClick={handleSendInput}
-            disabled={isLoading || !input.trim()}
-            className="w-full px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
+          <div className="composer-row">
+            <div className="composer-tools">
+              <button className="icon-btn" title="Attach file" onClick={() => fileRef.current?.click()}>
+                <Paperclip size={15} />
+              </button>
+              <button
+                className="icon-btn"
+                title="Add link"
+                onClick={() => addAttachment({ name: "link", kind: "link" })}
+              >
+                <Link size={15} />
+              </button>
+              <button className="icon-btn" title="Voice"><Mic size={15} /></button>
+              <input
+                ref={fileRef}
+                type="file"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) addAttachment({ name: f.name, kind: f.type.startsWith("image") ? "image" : "doc" });
+                }}
+              />
+            </div>
+            <button
+              className="send-btn"
+              disabled={!input.trim() || isLoading}
+              onClick={handleSend}
+            >
+              <Send size={14} />
+            </button>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
-}
-
-function clsx(...classes: (string | undefined | false)[]) {
-  return classes.filter(Boolean).join(" ");
 }
