@@ -34,7 +34,8 @@ export async function POST() {
   const env = {
     ...process.env,
     CONTEXT_DIR: path.join(cwd, "context"),
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+    XAI_API_KEY: process.env.XAI_API_KEY || "",
+    XAI_MODEL: process.env.XAI_MODEL || "",
     SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || "",
     SLACK_TEAM_ID: process.env.SLACK_TEAM_ID || "",
   };

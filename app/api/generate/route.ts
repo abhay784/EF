@@ -1,10 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NextRequest } from "next/server";
 import type { GenerateRequest, WeeklyBrief, Theme } from "@/lib/types";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const client = new OpenAI({
+  apiKey: process.env.XAI_API_KEY,
+  baseURL: "https://api.x.ai/v1",
 });
+
+const MODEL = process.env.XAI_MODEL || "grok-4-fast-non-reasoning";
 
 function buildSystemPrompt(brief: WeeklyBrief, theme: Theme): string {
   return `You are a short-form video script writer helping a builder turn their real work into content for TikTok, Instagram Reels, and YouTube Shorts (60–90 seconds).
@@ -63,31 +66,30 @@ export async function POST(req: NextRequest) {
 
     const systemPrompt = buildSystemPrompt(brief, theme);
 
-    const anthropicMessages = messages.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+    const chatMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ];
 
-    const stream = await client.messages.stream({
-      model: "claude-sonnet-4-6",
+    const stream = await client.chat.completions.create({
+      model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt,
-      messages: anthropicMessages,
+      messages: chatMessages,
+      stream: true,
     });
 
     const readable = new ReadableStream({
       async start(controller) {
         try {
           for await (const chunk of stream) {
-            if (
-              chunk.type === "content_block_delta" &&
-              chunk.delta.type === "text_delta"
-            ) {
-              const text = chunk.delta.text;
-              const data = { text };
+            const text = chunk.choices[0]?.delta?.content;
+            if (text) {
               controller.enqueue(
                 new TextEncoder().encode(
-                  `data: ${JSON.stringify(data)}\n\n`
+                  `data: ${JSON.stringify({ text })}\n\n`
                 )
               );
             }

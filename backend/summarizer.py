@@ -8,7 +8,9 @@ import httpx
 
 OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
 QWEN_MODEL = "qwen3:8b"
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4-fast-non-reasoning")
+XAI_URL = "https://api.x.ai/v1/chat/completions"
 
 
 def call_qwen(system: str, user_message: str) -> str:
@@ -37,18 +39,27 @@ def call_qwen(system: str, user_message: str) -> str:
         raise RuntimeError(f"Ollama call failed: {e}")
 
 
-def call_claude(system: str, user_message: str) -> str:
-    """Fallback: Call Claude Haiku via Anthropic API."""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=2048,
-        system=system,
-        messages=[{"role": "user", "content": user_message}],
+def call_xai(system: str, user_message: str) -> str:
+    """Fallback: Call Grok via xAI's OpenAI-compatible endpoint."""
+    response = httpx.post(
+        XAI_URL,
+        headers={
+            "Authorization": f"Bearer {XAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": XAI_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.3,
+            "stream": False,
+        },
+        timeout=120,
     )
-    return response.content[0].text
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
 
 
 def read_all_markdown_sources() -> str:
@@ -121,10 +132,10 @@ Generate the weekly brief in JSON format."""
         print("  ✓ Qwen summarization complete")
     except RuntimeError as e:
         print(f"  [warn] {e}")
-        if ANTHROPIC_API_KEY:
-            print("  Falling back to Claude Haiku...")
-            raw_response = call_claude(system_prompt, user_message)
-            print("  ✓ Claude summarization complete")
+        if XAI_API_KEY:
+            print(f"  Falling back to xAI ({XAI_MODEL})...")
+            raw_response = call_xai(system_prompt, user_message)
+            print("  ✓ xAI summarization complete")
         else:
             raise
 

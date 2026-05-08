@@ -118,12 +118,14 @@ def fetch_slack_data() -> list[dict]:
                     continue
 
             if filtered_messages:
+                messages_block = "\n".join(filtered_messages[:10])
+                week_label = (cutoff + timedelta(days=7)).strftime('%Y-%m-%d')
                 md = f"""# Slack: #{channel_name}
 **Source**: slack
-**Week**: {(cutoff + timedelta(days=7)).strftime('%Y-%m-%d')}
+**Week**: {week_label}
 
 ## Key messages
-{"".join(m + "\n" for m in filtered_messages[:10])}
+{messages_block}
 """
                 results.append({"channel": channel_name, "markdown": md})
 
