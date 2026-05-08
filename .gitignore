@@ -20,6 +20,9 @@ context/granola/
 context/weekly_brief.json
 context/uploads/
 
+# Slack token store (per-team bot tokens)
+data/
+
 # IDE
 .vscode/
 .idea/

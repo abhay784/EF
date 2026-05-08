@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { spawn } from "child_process";
 import path from "path";
+import { getInstall } from "@/lib/slackStore";
 
 interface ScriptResult {
   code: number;
@@ -31,13 +33,17 @@ function runScript(
 
 export async function POST() {
   const cwd = process.cwd();
+
+  const teamId = cookies().get("slack_team_id")?.value;
+  const install = teamId ? await getInstall(teamId) : null;
+
   const env = {
     ...process.env,
     CONTEXT_DIR: path.join(cwd, "context"),
     XAI_API_KEY: process.env.XAI_API_KEY || "",
     XAI_MODEL: process.env.XAI_MODEL || "",
-    SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || "",
-    SLACK_TEAM_ID: process.env.SLACK_TEAM_ID || "",
+    SLACK_BOT_TOKEN: install?.accessToken || process.env.SLACK_BOT_TOKEN || "",
+    SLACK_TEAM_ID: install?.teamId || process.env.SLACK_TEAM_ID || "",
   };
 
   const logs: string[] = [];

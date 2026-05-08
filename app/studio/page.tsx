@@ -28,9 +28,11 @@ interface TopBarProps {
   isSyncing: boolean;
   onSync: () => void;
   slackConnected: boolean;
+  slackTeamName: string | null;
+  onSlackDisconnect: () => void;
 }
 
-function TopBar({ brief, isSyncing, onSync, slackConnected }: TopBarProps) {
+function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSlackDisconnect }: TopBarProps) {
   const { range, label } = getWeekLabel();
 
   return (
@@ -77,13 +79,17 @@ function TopBar({ brief, isSyncing, onSync, slackConnected }: TopBarProps) {
           </span>
           <button
             type="button"
-            className="pill"
+            className={"pill" + (slackConnected ? "" : " warn")}
             onClick={() => {
-              if (slackConnected) return;
-              window.open("/api/slack/install", "_blank", "noopener,noreferrer");
+              if (slackConnected) {
+                if (confirm(`Disconnect Slack from "${slackTeamName || "this workspace"}"?`)) {
+                  onSlackDisconnect();
+                }
+              } else {
+                window.open("/api/slack/install", "_blank", "noopener,noreferrer");
+              }
             }}
-            title={slackConnected ? "Slack connected" : "Click to connect Slack"}
-            style={{ cursor: slackConnected ? "default" : "pointer", border: 0, font: "inherit" }}
+            title={slackConnected ? `Connected to ${slackTeamName} — click to disconnect` : "Click to connect Slack"}
           >
             <span className="pill-dot" />
             <Slack size={11} /> slack
@@ -112,10 +118,21 @@ export default function StudioPage() {
   const [activeTheme, setActiveTheme] = useState<Theme | null>(null);
   const [isRefining, setIsRefining] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeamName, setSlackTeamName] = useState<string | null>(null);
 
   useEffect(() => {
     fetchBrief();
     fetchSlackStatus();
+    const onMessage = (e: MessageEvent) => {
+      if (e.data && e.data.slackConnected) fetchSlackStatus();
+    };
+    const onFocus = () => fetchSlackStatus();
+    window.addEventListener("message", onMessage);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   const fetchSlackStatus = async () => {
@@ -123,10 +140,48 @@ export default function StudioPage() {
       const res = await fetch("/api/slack/status");
       if (res.ok) {
         const data = await res.json();
+        const wasConnected = slackConnected;
         setSlackConnected(Boolean(data.connected));
+        setSlackTeamName(data.teamName || null);
+        // When we just transitioned to connected, run the live test and log it to browser console.
+        if (data.connected && !wasConnected) {
+          runSlackProbe();
+        }
       }
     } catch {
       // status stays false
+    }
+  };
+
+  const runSlackProbe = async () => {
+    try {
+      console.log("[slack] Running live integration test against your workspace…");
+      const res = await fetch("/api/slack/test");
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[slack] test failed:", data);
+        return;
+      }
+      console.log("[slack] ✓ Connected as:", data.auth_test?.user, "in", data.auth_test?.team);
+      console.log(`[slack] ${data.channels?.total_visible} channels visible, member of ${data.channels?.bot_is_member_of}`);
+      console.table(data.channels?.list);
+      if (data.sample_messages?.messages?.length) {
+        console.log(`[slack] Sample messages from #${data.sample_messages.from_channel}:`);
+        console.table(data.sample_messages.messages);
+      } else {
+        console.log("[slack] No sample messages found:", data.sample_messages?.hint);
+      }
+    } catch (e) {
+      console.error("[slack] probe error:", e);
+    }
+  };
+
+  const handleSlackDisconnect = async () => {
+    try {
+      await fetch("/api/slack/disconnect", { method: "POST" });
+    } finally {
+      setSlackConnected(false);
+      setSlackTeamName(null);
     }
   };
 
@@ -151,7 +206,14 @@ export default function StudioPage() {
 
   return (
     <div className="app">
-      <TopBar brief={brief} isSyncing={isSyncing} onSync={handleSync} slackConnected={slackConnected} />
+      <TopBar
+        brief={brief}
+        isSyncing={isSyncing}
+        onSync={handleSync}
+        slackConnected={slackConnected}
+        slackTeamName={slackTeamName}
+        onSlackDisconnect={handleSlackDisconnect}
+      />
       <div className="main">
         <ChatPanel
           brief={brief}
