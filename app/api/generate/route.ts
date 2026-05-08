@@ -9,6 +9,22 @@ const client = new OpenAI({
 
 const MODEL = process.env.XAI_MODEL || "grok-4-fast-non-reasoning";
 
+const STORYBOARD_GENERATION_GUIDANCE = `Use the selected storyboard as the source of truth for the narrative chain.
+- Preserve source attribution inside the storyboard field.
+- Keep each storyboard event discrete, present tense, and under 20 words.
+- Use chained events to inform the script's hook and middle.
+- If the user asks to expand, tighten, reorder, or inspect the story, update the storyboard field as well as the script.`;
+
+function formatStoryboardContext(theme: Theme): string {
+  if (!theme.storyboard) {
+    return "No structured storyboard is available yet. Infer the narrative chain from the weekly brief and selected theme.";
+  }
+
+  return JSON.stringify(theme.storyboard, null, 2);
+}
+
+function buildSystemPrompt(brief: WeeklyBrief, theme: Theme): string {
+  return `You are a short-form video script writer helping a builder turn their real work into content for TikTok, Instagram Reels, and YouTube Shorts (60–90 seconds).
 function buildSystemPrompt(brief: WeeklyBrief | null, theme: Theme | null): string {
   if (!theme) {
     return `You are the chat assistant inside Weekly — an app that turns a builder's work activity (Claude Code sessions, Slack messages, Granola meeting notes) into short-form video scripts.
@@ -37,6 +53,12 @@ What happened: ${theme.one_liner}
 The angle: ${theme.content_angle}
 Sources: ${theme.sources.join(", ")}
 
+## Selected storyboard
+${formatStoryboardContext(theme)}
+
+## Storyboard handling
+${STORYBOARD_GENERATION_GUIDANCE}
+
 ## What makes great short-form video scripts
 
 HOOK (0–10s): Must create a pattern interrupt. Best hooks are:
@@ -60,6 +82,21 @@ Don't stack multiple CTAs.
 ## Output format
 Return ONLY this JSON — no preamble, no markdown fences, no code blocks:
 {
+  "hook": "spoken text for 0–10s",
+  "middle": "spoken text for 10–50s",
+  "cta": "spoken text for 50–60s",
+  "storyboard": {
+    "title": "Inferred story title",
+    "overview": "One or two sentence arc of events.",
+    "phases": [],
+    "parallel_events": [],
+    "key_turning_points": [],
+    "open_threads": [],
+    "narrative_summary": "Plain prose summary."
+  }
+}
+
+For follow-up edits (user asks to change something), return the full updated JSON with hook, middle, cta, and storyboard — even fields that didn't change.`;
   "reply": "Short conversational message to the builder (1–3 sentences). What you did, or your answer if they asked a question.",
   "script": {
     "hook": "spoken text for 0–10s",
@@ -100,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     const stream = await client.chat.completions.create({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: chatMessages,
       stream: true,
     });
