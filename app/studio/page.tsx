@@ -2,23 +2,39 @@
 
 import { useState, useEffect } from "react";
 import ChatPanel from "@/components/ChatPanel";
-import PreviewPanel from "@/components/PreviewPanel";
 import CodeUploadModal from "@/components/CodeUploadModal";
-import { Settings, Calendar, Slack, Code } from "@/components/Icons";
-import type { WeeklyBrief, VideoScript, Theme } from "@/lib/types";
+import GranolaConnectModal from "@/components/GranolaConnectModal";
+import { Calendar, Slack, Code } from "@/components/Icons";
 
 interface TopBarProps {
-  brief: WeeklyBrief | null;
   isSyncing: boolean;
+  hasSynced: boolean;
   onSync: () => void;
   slackConnected: boolean;
   slackTeamName: string | null;
   onSlackDisconnect: () => void;
   onOpenCodeUpload: () => void;
   uploadCount: number;
+  granolaConnected: boolean;
+  granolaOwner: string | null;
+  onGranolaConnectClick: () => void;
+  onGranolaDisconnect: () => void;
 }
 
-function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSlackDisconnect, onOpenCodeUpload, uploadCount }: TopBarProps) {
+function TopBar({
+  isSyncing,
+  hasSynced,
+  onSync,
+  slackConnected,
+  slackTeamName,
+  onSlackDisconnect,
+  onOpenCodeUpload,
+  uploadCount,
+  granolaConnected,
+  granolaOwner,
+  onGranolaConnectClick,
+  onGranolaDisconnect,
+}: TopBarProps) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -41,13 +57,26 @@ function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSla
       <div className="top-right">
         <div className="sync">
           <span className={"dot" + (isSyncing ? " syncing" : " pulse")} />
-          <span>{isSyncing ? "Syncing…" : brief ? "Synced" : "Not synced"}</span>
+          <span>{isSyncing ? "Syncing…" : hasSynced ? "Synced" : "Not synced"}</span>
         </div>
         <div className="source-pills">
-          <span className="pill">
+          <button
+            type="button"
+            className={"pill" + (granolaConnected ? "" : " warn")}
+            onClick={() => {
+              if (granolaConnected) {
+                if (confirm(`Disconnect Granola from "${granolaOwner || "this account"}"?`)) {
+                  onGranolaDisconnect();
+                }
+              } else {
+                onGranolaConnectClick();
+              }
+            }}
+            title={granolaConnected ? `Connected as ${granolaOwner} — click to disconnect` : "Click to connect Granola"}
+          >
             <span className="pill-dot" />
-            <Calendar size={11} /> granola · {brief ? brief.themes.length : 0}
-          </span>
+            <Calendar size={11} /> granola
+          </button>
           <button
             type="button"
             className={"pill" + (slackConnected ? "" : " warn")}
@@ -67,7 +96,7 @@ function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSla
           </button>
           <button
             type="button"
-            className={"pill" + (uploadCount === 0 && !brief ? " warn" : "")}
+            className={"pill" + (uploadCount === 0 ? " warn" : "")}
             onClick={onOpenCodeUpload}
             title="Click to add Claude/code context (paste or upload .md files)"
           >
@@ -78,30 +107,26 @@ function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSla
         <button className="sync-btn" onClick={onSync} disabled={isSyncing}>
           {isSyncing ? "Syncing…" : "Sync"}
         </button>
-        <button className="icon-btn" title="Settings">
-          <Settings size={15} />
-        </button>
       </div>
     </div>
   );
 }
 
 export default function StudioPage() {
-  const [brief, setBrief] = useState<WeeklyBrief | null>(null);
-  const [script, setScript] = useState<VideoScript | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [activeTheme, setActiveTheme] = useState<Theme | null>(null);
-  const [isRefining, setIsRefining] = useState(false);
+  const [hasSynced, setHasSynced] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
   const [slackTeamName, setSlackTeamName] = useState<string | null>(null);
   const [codeUploadOpen, setCodeUploadOpen] = useState(false);
   const [uploadCount, setUploadCount] = useState(0);
+  const [granolaConnectOpen, setGranolaConnectOpen] = useState(false);
+  const [granolaConnected, setGranolaConnected] = useState(false);
+  const [granolaOwner, setGranolaOwner] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchBrief();
     fetchSlackStatus();
     fetchUploadCount();
+    fetchGranolaStatus();
     const onMessage = (e: MessageEvent) => {
       if (e.data && e.data.slackConnected) fetchSlackStatus();
     };
@@ -126,6 +151,47 @@ export default function StudioPage() {
     }
   };
 
+  const fetchGranolaStatus = async () => {
+    try {
+      const res = await fetch("/api/granola/status");
+      if (res.ok) {
+        const data = await res.json();
+        const wasConnected = granolaConnected;
+        setGranolaConnected(Boolean(data.connected));
+        setGranolaOwner(data.ownerName || null);
+        if (data.connected && !wasConnected) runGranolaProbe();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const runGranolaProbe = async () => {
+    try {
+      console.log("[granola] Running live test against your account…");
+      const res = await fetch("/api/granola/test");
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[granola] test failed:", data);
+        return;
+      }
+      console.log(`[granola] ✓ Connected as: ${data.owner?.name} (${data.owner?.email})`);
+      console.log(`[granola] ${data.note_count} total notes; sample of ${data.sample?.length}:`);
+      console.table(data.sample);
+    } catch (e) {
+      console.error("[granola] probe error:", e);
+    }
+  };
+
+  const handleGranolaDisconnect = async () => {
+    try {
+      await fetch("/api/granola/disconnect", { method: "POST" });
+    } finally {
+      setGranolaConnected(false);
+      setGranolaOwner(null);
+    }
+  };
+
   const fetchSlackStatus = async () => {
     try {
       const res = await fetch("/api/slack/status");
@@ -134,13 +200,10 @@ export default function StudioPage() {
         const wasConnected = slackConnected;
         setSlackConnected(Boolean(data.connected));
         setSlackTeamName(data.teamName || null);
-        // When we just transitioned to connected, run the live test and log it to browser console.
-        if (data.connected && !wasConnected) {
-          runSlackProbe();
-        }
+        if (data.connected && !wasConnected) runSlackProbe();
       }
     } catch {
-      // status stays false
+      // ignore
     }
   };
 
@@ -159,8 +222,6 @@ export default function StudioPage() {
       if (data.sample_messages?.messages?.length) {
         console.log(`[slack] Sample messages from #${data.sample_messages.from_channel}:`);
         console.table(data.sample_messages.messages);
-      } else {
-        console.log("[slack] No sample messages found:", data.sample_messages?.hint);
       }
     } catch (e) {
       console.error("[slack] probe error:", e);
@@ -176,20 +237,13 @@ export default function StudioPage() {
     }
   };
 
-  const fetchBrief = async () => {
-    try {
-      const res = await fetch("/api/brief");
-      if (res.ok) setBrief(await res.json());
-    } catch {
-      // brief stays null
-    }
-  };
-
   const handleSync = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/sync", { method: "POST" });
-      await fetchBrief();
+      const res = await fetch("/api/sync", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      console.log("[sync]", data);
+      setHasSynced(true);
     } finally {
       setIsSyncing(false);
     }
@@ -198,35 +252,31 @@ export default function StudioPage() {
   return (
     <div className="app">
       <TopBar
-        brief={brief}
         isSyncing={isSyncing}
+        hasSynced={hasSynced}
         onSync={handleSync}
         slackConnected={slackConnected}
         slackTeamName={slackTeamName}
         onSlackDisconnect={handleSlackDisconnect}
         onOpenCodeUpload={() => setCodeUploadOpen(true)}
         uploadCount={uploadCount}
+        granolaConnected={granolaConnected}
+        granolaOwner={granolaOwner}
+        onGranolaConnectClick={() => setGranolaConnectOpen(true)}
+        onGranolaDisconnect={handleGranolaDisconnect}
       />
       <CodeUploadModal
         open={codeUploadOpen}
         onClose={() => setCodeUploadOpen(false)}
         onSaved={fetchUploadCount}
       />
-      <div className="main">
-        <ChatPanel
-          brief={brief}
-          onScriptUpdate={setScript}
-          onLoadingChange={setIsLoading}
-          onActiveThemeChange={setActiveTheme}
-          onRefiningChange={setIsRefining}
-          isSyncing={isSyncing}
-        />
-        <PreviewPanel
-          script={script}
-          isLoading={isLoading}
-          activeTheme={activeTheme}
-          isRefining={isRefining}
-        />
+      <GranolaConnectModal
+        open={granolaConnectOpen}
+        onClose={() => setGranolaConnectOpen(false)}
+        onConnected={fetchGranolaStatus}
+      />
+      <div className="main" style={{ gridTemplateColumns: "1fr" }}>
+        <ChatPanel isSyncing={isSyncing} />
       </div>
     </div>
   );
