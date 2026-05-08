@@ -24,6 +24,8 @@ Required:
 
 Optional:
 - `XAI_MODEL` — defaults to `grok-4-fast-non-reasoning`
+- `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SECRET_KEY` — enables private Supabase Storage snapshots of Grok outputs
+- `SUPABASE_LLM_OUTPUTS_BUCKET` — storage bucket for LLM output JSON (defaults to `llm-outputs`)
 - `SLACK_BOT_TOKEN` — Slack bot token (install MCP server first)
 - `SLACK_TEAM_ID` — Slack workspace team ID
 
@@ -60,6 +62,7 @@ Click the **Sync** button to:
 2. Fetch recent Slack messages (if configured)
 3. Process Granola exports (if dropped in `context/granola/`)
 4. Summarize everything with xAI Grok → `context/weekly_brief.json`
+5. If Supabase is configured, upload the raw Grok response and normalized brief to Storage
 
 ### Create Video Scripts
 
@@ -125,6 +128,8 @@ ChatPanel shows theme chips
 /api/generate → Grok SSE
     ↓
 StoryboardPanel renders Hook/Middle/CTA
+    ↓
+Supabase Storage stores the raw and parsed script generation response
 ```
 
 ## Gotchas & Notes

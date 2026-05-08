@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 import json
 import os
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
-from urllib import request
+from urllib import error, parse, request
 
 
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4-fast-non-reasoning")
 XAI_URL = "https://api.x.ai/v1/chat/completions"
+SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "").rstrip("/")
+SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY", "")
+SUPABASE_LLM_OUTPUTS_BUCKET = os.environ.get("SUPABASE_LLM_OUTPUTS_BUCKET", "llm-outputs")
 
 
 def post_json(url: str, payload: dict, headers=None) -> dict:
@@ -24,6 +28,79 @@ def post_json(url: str, payload: dict, headers=None) -> dict:
     )
     with request.urlopen(req, timeout=120) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def supabase_storage_headers(content_type=None) -> dict:
+    headers = {
+        "apikey": SUPABASE_SECRET_KEY,
+        "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def ensure_supabase_bucket() -> bool:
+    """Create the private storage bucket on demand when Supabase is configured."""
+    if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        print("  [warn] Skipping Supabase upload: missing Supabase environment variables")
+        return False
+
+    bucket_id = parse.quote(SUPABASE_LLM_OUTPUTS_BUCKET, safe="")
+    get_req = request.Request(
+        f"{SUPABASE_URL}/storage/v1/bucket/{bucket_id}",
+        headers=supabase_storage_headers(),
+        method="GET",
+    )
+
+    try:
+        with request.urlopen(get_req, timeout=30):
+            return True
+    except error.HTTPError as e:
+        if e.code != 404:
+            print(f"  [warn] Failed to inspect Supabase bucket: {e}")
+            return False
+
+    create_req = request.Request(
+        f"{SUPABASE_URL}/storage/v1/bucket",
+        data=json.dumps({
+            "id": SUPABASE_LLM_OUTPUTS_BUCKET,
+            "name": SUPABASE_LLM_OUTPUTS_BUCKET,
+            "public": False,
+        }).encode("utf-8"),
+        headers=supabase_storage_headers("application/json"),
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(create_req, timeout=30):
+            return True
+    except error.HTTPError as e:
+        print(f"  [warn] Failed to create Supabase bucket: {e}")
+        return False
+
+
+def upload_llm_output(kind: str, payload: dict):
+    """Upload an LLM output snapshot to Supabase Storage without adding dependencies."""
+    if not ensure_supabase_bucket():
+        return
+
+    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
+    day = datetime.utcnow().strftime("%Y-%m-%d")
+    object_path = f"{kind}/{day}/{timestamp}-{uuid.uuid4()}.json"
+    encoded_path = parse.quote(object_path, safe="/")
+    upload_req = request.Request(
+        f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_LLM_OUTPUTS_BUCKET}/{encoded_path}",
+        data=json.dumps(payload, indent=2).encode("utf-8"),
+        headers=supabase_storage_headers("application/json"),
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(upload_req, timeout=30):
+            print(f"  ✓ Uploaded LLM output to Supabase Storage: {object_path}")
+    except Exception as e:
+        print(f"  [warn] Failed to upload LLM output to Supabase Storage: {e}")
 
 
 def call_xai(system: str, user_message: str) -> str:
@@ -400,6 +477,22 @@ Generate the weekly brief in JSON format."""
     output_path.write_text(json.dumps(brief, indent=2), encoding="utf-8")
     print(f"\n✓ Wrote {output_path}")
     print(f"  Found {len(brief['themes'])} themes")
+    upload_llm_output(
+        "weekly_brief",
+        {
+            "type": "weekly_brief",
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "model": XAI_MODEL,
+            "output": {
+                "raw_response": raw_response,
+                "brief": brief,
+            },
+            "metadata": {
+                "week": brief["week"],
+                "theme_count": len(brief["themes"]),
+            },
+        },
+    )
 
 
 if __name__ == "__main__":

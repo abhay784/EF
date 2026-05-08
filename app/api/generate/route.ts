@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextRequest } from "next/server";
 import type { GenerateRequest, WeeklyBrief, Theme } from "@/lib/types";
+import { uploadLlmOutput } from "@/lib/supabase/llmOutputs";
 
 const client = new OpenAI({
   apiKey: process.env.XAI_API_KEY,
@@ -25,6 +26,22 @@ function formatStoryboardContext(theme: Theme): string {
   }
 
   return JSON.stringify(theme.storyboard, null, 2);
+}
+
+function parseModelJson(rawText: string) {
+  let jsonText = rawText.trim();
+  if (jsonText.startsWith("```")) {
+    jsonText = jsonText.split("```")[1] ?? jsonText;
+    if (jsonText.startsWith("json")) {
+      jsonText = jsonText.slice(4);
+    }
+  }
+
+  try {
+    return JSON.parse(jsonText.trim()) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function buildSystemPrompt(brief: WeeklyBrief | null, theme: Theme | null): string {
@@ -190,10 +207,13 @@ export async function POST(req: NextRequest) {
 
     const readable = new ReadableStream({
       async start(controller) {
+        const outputChunks: string[] = [];
+
         try {
           for await (const chunk of stream) {
             const text = chunk.choices[0]?.delta?.content;
             if (text) {
+              outputChunks.push(text);
               controller.enqueue(
                 new TextEncoder().encode(
                   `data: ${JSON.stringify({ text })}\n\n`
@@ -201,6 +221,23 @@ export async function POST(req: NextRequest) {
               );
             }
           }
+
+          const rawOutput = outputChunks.join("");
+          await uploadLlmOutput({
+            type: "script_generation",
+            created_at: new Date().toISOString(),
+            model: MODEL,
+            output: {
+              raw_response: rawOutput,
+              parsed_response: parseModelJson(rawOutput),
+            },
+            metadata: {
+              theme_title: theme?.title ?? null,
+              brief_week: brief?.week ?? null,
+              message_count: messages.length,
+            },
+          });
+
           controller.enqueue(
             new TextEncoder().encode("data: [DONE]\n\n")
           );
