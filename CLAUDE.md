@@ -40,7 +40,7 @@ The sync flow runs when the user clicks **Sync** in the UI, which hits `POST /ap
 1. `backend/aggregator/claude_code.py` — reads `~/.claude/projects/*.jsonl`, extracts session summaries → `context/sessions/*.md`
 2. `backend/aggregator/slack.py` — fetches messages via `@anthropic-ai/mcp-server-slack` → `context/slack/*.md`
 3. `backend/aggregator/granola.py` — watches `context/granola/` for user-dropped `.md` files
-4. `backend/summarizer.py` — sends all markdown to Qwen 3 via Ollama (fallback: Claude Haiku) → `context/weekly_brief.json`
+4. `backend/summarizer.py` — sends all markdown to Qwen 3 via Ollama (fallback: xAI) → `context/weekly_brief.json`
 
 The Next.js API route at `app/api/sync/route.ts` shells out to run these Python scripts.
 
@@ -49,16 +49,17 @@ The Next.js API route at `app/api/sync/route.ts` shells out to run these Python 
 ```
 /api/brief  →  ChatPanel (theme chips)
                    ↓ user selects theme
-/api/generate  →  StoryboardPanel (Hook / Middle / CTA cards)
+/api/generate  →  PreviewPanel (Hook / Middle / CTA cards)
 ```
 
-`/api/generate` streams Claude's response via SSE using `@anthropic-ai/sdk`. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context.
+`/api/generate` streams an OpenAI-compatible chat response from xAI via SSE. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context.
 
 ### Key Type Contracts (`lib/types.ts`)
 
 - `WeeklyBrief` — the synthesized output of the pipeline; `themes[]` drives the UI
-- `Theme` — has `title`, `one_liner`, `content_angle`, `sources[]`, `suggested_formats[]`
-- `VideoScript` — `hook`, `middle`, `cta` strings returned by Claude
+- `Theme` — has `title`, `one_liner`, `content_angle`, `sources[]`, `suggested_formats[]`, and optional `storyboard`
+- `Storyboard` — structured source-attributed phases, events, turning points, open threads, and narrative summary
+- `VideoScript` — `hook`, `middle`, `cta` strings plus optional `storyboard` returned by generation
 - `ChatMessage` — standard `role`/`content` for the conversation history
 
 ## Environment Variables
@@ -67,7 +68,8 @@ Copy `.env.example` → `.env.local`:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Claude API for script generation + Haiku fallback |
+| `XAI_API_KEY` | Yes | xAI API for script generation + summarizer fallback |
+| `XAI_MODEL` | No | xAI model name (default `grok-4-fast-non-reasoning`) |
 | `CLAUDE_PROJECTS_DIR` | Yes | Path to `~/.claude/projects` JSONL files |
 | `CONTEXT_DIR` | Yes | Working directory for aggregated data (default `./context`) |
 | `SLACK_BOT_TOKEN` | No | Slack bot token for message ingestion |
@@ -76,6 +78,6 @@ Copy `.env.example` → `.env.local`:
 ## Gotchas
 
 - **Claude Code JSONL**: The directory name at `~/.claude/projects/` encodes the path (lossy). Always use the `cwd` field from individual JSONL records, not the directory name. `ai-title` is absent ~70% of the time — fall back to the first user message.
-- **Ollama**: First run pulls ~5GB Qwen 3 model. Summarization takes 10-20s on Apple Silicon. The summarizer auto-falls back to Claude Haiku if Ollama isn't reachable.
+- **Ollama**: First run pulls ~5GB Qwen 3 model. Summarization takes 10-20s on Apple Silicon. The summarizer auto-falls back to xAI if Ollama isn't reachable and `XAI_API_KEY` is set.
 - **Slack**: The `@anthropic-ai/mcp-server-slack` global package must be installed (`npm install -g`). The bot must be manually invited to each channel.
 - **Granola**: Currently manual — user drops exported `.md` files into `context/granola/`. A direct API integration via MCP is planned but not implemented.
