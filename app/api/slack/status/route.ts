@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { getInstall } from "@/lib/slackStore";
 
 export async function GET() {
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const teamId = process.env.SLACK_TEAM_ID;
-  const connected = Boolean(botToken && botToken.startsWith("xoxb-") && teamId);
+  const teamId = cookies().get("slack_team_id")?.value;
+  if (!teamId) {
+    return NextResponse.json({ connected: false, teamId: null, teamName: null });
+  }
+
+  const install = await getInstall(teamId);
+  if (!install) {
+    return NextResponse.json({ connected: false, teamId: null, teamName: null });
+  }
 
   return NextResponse.json({
-    connected,
-    teamId: connected ? teamId : null,
+    connected: true,
+    teamId: install.teamId,
+    teamName: install.teamName,
   });
 }

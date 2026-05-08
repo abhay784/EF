@@ -61,6 +61,7 @@ def read_all_markdown_sources() -> str:
         ("sessions", "claude_code"),
         ("slack", "slack"),
         ("granola", "granola"),
+        ("uploads", "manual_upload"),
     ]
 
     for subdir, source_type in sources:

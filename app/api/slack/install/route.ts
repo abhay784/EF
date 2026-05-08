@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 
-const BOT_SCOPES = [
+const USER_SCOPES = [
   "channels:history",
   "channels:read",
   "groups:history",
   "groups:read",
+  "im:history",
+  "im:read",
+  "mpim:history",
+  "mpim:read",
   "users:read",
   "team:read",
 ].join(",");
@@ -23,7 +27,7 @@ export async function GET(req: Request) {
 
   const authUrl = new URL("https://slack.com/oauth/v2/authorize");
   authUrl.searchParams.set("client_id", clientId);
-  authUrl.searchParams.set("scope", BOT_SCOPES);
+  authUrl.searchParams.set("user_scope", USER_SCOPES);
   authUrl.searchParams.set("redirect_uri", redirectUri);
 
   return NextResponse.redirect(authUrl.toString());

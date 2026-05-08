@@ -23,9 +23,9 @@ npm run lint
 # Production
 npm run build && npm start
 
-# Run Python aggregators manually (requires CONTEXT_DIR env var)
+# Run Python aggregators manually (requires CONTEXT_DIR and XAI_API_KEY env vars)
 CONTEXT_DIR=./context python3 backend/aggregator/claude_code.py
-CONTEXT_DIR=./context python3 backend/summarizer.py
+CONTEXT_DIR=./context XAI_API_KEY=... python3 backend/summarizer.py
 ```
 
 ## Architecture
@@ -44,12 +44,13 @@ The Next.js API route at `app/api/sync/route.ts` shells out to run these Python 
 ### Frontend Flow
 
 ```
-/api/brief  →  ChatPanel (theme chips)
-                   ↓ user selects theme
-/api/generate  →  PreviewPanel (Hook / Middle / CTA cards)
+/api/brief  →  ChatPanel (theme chips + chat)
+                   ↓ user picks angle or types in chat
+/api/generate  →  streams JSON {reply, script}
+                   ↓ reply renders in chat, script renders in PreviewPanel
 ```
 
-`/api/generate` streams an OpenAI-compatible chat response from xAI via SSE. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context.
+`/api/generate` streams xAI Grok's response via SSE using the `openai` SDK pointed at `https://api.x.ai/v1`. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context. The model returns `{"reply": "...", "script": {hook, middle, cta} | null}` — `script` is null on pure-question follow-ups so the existing draft is preserved.
 
 ### Key Type Contracts (`lib/types.ts`)
 
@@ -65,8 +66,8 @@ Copy `.env.example` → `.env.local`:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `XAI_API_KEY` | Yes | xAI API for script generation + summarization |
-| `XAI_MODEL` | No | xAI model name (default `grok-4-fast-non-reasoning`) |
+| `XAI_API_KEY` | Yes | xAI API key — powers both summarization and script generation |
+| `XAI_MODEL` | No | Defaults to `grok-4-fast-non-reasoning` |
 | `CLAUDE_PROJECTS_DIR` | Yes | Path to `~/.claude/projects` JSONL files |
 | `CONTEXT_DIR` | Yes | Working directory for aggregated data (default `./context`) |
 | `SLACK_BOT_TOKEN` | No | Slack bot token for message ingestion |

@@ -10,6 +10,43 @@ interface Attachment {
   kind: "doc" | "image" | "link";
 }
 
+function extractReplyAndScript(text: string): { reply: string; script: VideoScript | null } {
+  const trimmed = text.trim();
+  if (!trimmed) return { reply: "", script: null };
+
+  const candidates: string[] = [trimmed];
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) candidates.unshift(fenced[1].trim());
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        const reply = typeof parsed.reply === "string" ? parsed.reply : "";
+        const s = parsed.script;
+        const script =
+          s && typeof s.hook === "string" && typeof s.middle === "string" && typeof s.cta === "string"
+            ? (s as VideoScript)
+            : typeof parsed.hook === "string" && typeof parsed.middle === "string" && typeof parsed.cta === "string"
+            ? { hook: parsed.hook, middle: parsed.middle, cta: parsed.cta }
+            : null;
+        if (reply || script) {
+          return { reply: reply || "Updated the script on the right.", script };
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { reply: trimmed, script: null };
+}
+
 interface ChatPanelProps {
   brief: WeeklyBrief | null;
   onScriptUpdate: (script: VideoScript | null) => void;
@@ -71,11 +108,11 @@ export default function ChatPanel({
 
   const sendMessage = useCallback(
     async (text: string, themeOverride?: Theme) => {
-      if (!text.trim() || !brief) return;
+      if (!text.trim()) return;
 
-      const themeForRequest = themeOverride ?? activeTheme ?? brief.themes[0] ?? null;
-      if (!themeForRequest) return;
-      if (!activeTheme || activeTheme.title !== themeForRequest.title) {
+      const themeForRequest =
+        themeOverride ?? activeTheme ?? brief?.themes[0] ?? null;
+      if (themeForRequest && (!activeTheme || activeTheme.title !== themeForRequest.title)) {
         setTheme(themeForRequest);
       }
 
@@ -87,7 +124,7 @@ export default function ChatPanel({
       setIsLoading(true);
       onLoadingChange(true);
       if (!isFirstMsg) onRefiningChange(false);
-      onScriptUpdate(null);
+      if (isFirstMsg && themeForRequest) onScriptUpdate(null);
 
       try {
         const response = await fetch("/api/generate", {
@@ -119,17 +156,18 @@ export default function ChatPanel({
           }
         }
 
-        try {
-          const script = JSON.parse(assistantText) as VideoScript;
+        const { reply, script } = extractReplyAndScript(assistantText);
+        if (script) {
           onScriptUpdate(script);
           if (!isFirstMsg) onRefiningChange(true);
-        } catch {
-          onScriptUpdate(null);
         }
-
-        setMessages((prev) => [...prev, { role: "assistant", content: assistantText }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
       } catch (err) {
         console.error("generate failed:", err);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Something went wrong on my end. Try again?" },
+        ]);
       } finally {
         setIsLoading(false);
         onLoadingChange(false);
@@ -260,11 +298,10 @@ export default function ChatPanel({
           }
           return (
             <ClaudeMsg key={idx}>
-              <div className="msg-name">Claude · drafting</div>
-              <p>
-                On it. Pulling from your sources — I&apos;ve drafted the script on the right.
-                Tell me what to tighten — hook, middle, or CTA.
-              </p>
+              <div className="msg-name">Claude</div>
+              {msg.content
+                .split(/\n{2,}/)
+                .map((para, p) => <p key={p}>{para}</p>)}
             </ClaudeMsg>
           );
         })}

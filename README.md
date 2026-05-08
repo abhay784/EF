@@ -19,11 +19,11 @@ cp .env.example .env.local
 
 Required:
 - `XAI_API_KEY` — for Grok summarization and video script generation
-- `XAI_MODEL` — xAI model name, defaults to `grok-4-fast-non-reasoning`
 - `CLAUDE_PROJECTS_DIR` — path to your Claude Code projects (usually `~/.claude/projects`)
 - `CONTEXT_DIR` — where to store aggregated data (default: `./context`)
 
-Optional (for Slack integration):
+Optional:
+- `XAI_MODEL` — defaults to `grok-4-fast-non-reasoning`
 - `SLACK_BOT_TOKEN` — Slack bot token (install MCP server first)
 - `SLACK_TEAM_ID` — Slack workspace team ID
 
@@ -59,7 +59,7 @@ Click the **Sync** button to:
 1. Read Claude Code session logs from `~/.claude/projects/`
 2. Fetch recent Slack messages (if configured)
 3. Process Granola exports (if dropped in `context/granola/`)
-4. Summarize everything with Grok → `context/weekly_brief.json`
+4. Summarize everything with xAI Grok → `context/weekly_brief.json`
 
 ### Create Video Scripts
 
