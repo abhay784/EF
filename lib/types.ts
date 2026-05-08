@@ -27,7 +27,7 @@ export interface ChatMessage {
 }
 
 export interface GenerateRequest {
-  theme: Theme;
+  theme: Theme | null;
   messages: ChatMessage[];
-  brief: WeeklyBrief;
+  brief: WeeklyBrief | null;
 }

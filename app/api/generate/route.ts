@@ -9,8 +9,24 @@ const client = new OpenAI({
 
 const MODEL = process.env.XAI_MODEL || "grok-4-fast-non-reasoning";
 
-function buildSystemPrompt(brief: WeeklyBrief, theme: Theme): string {
-  return `You are a short-form video script writer helping a builder turn their real work into content for TikTok, Instagram Reels, and YouTube Shorts (60–90 seconds).
+function buildSystemPrompt(brief: WeeklyBrief | null, theme: Theme | null): string {
+  if (!theme) {
+    return `You are the chat assistant inside Weekly — an app that turns a builder's work activity (Claude Code sessions, Slack messages, Granola meeting notes) into short-form video scripts.
+
+The builder hasn't synced their week yet, so you don't have any of their activity to draw on. Be helpful and direct: answer questions about the app, what Sync does, how to get started, or anything else they ask. If they want a script, tell them to hit the Sync button so you can read their week first.
+
+## Output format
+Return ONLY this JSON — no preamble, no markdown fences, no code blocks:
+{
+  "reply": "Your conversational message to the builder. 1–4 sentences.",
+  "script": null
+}
+
+Always set "script" to null in this mode — there's no week to draw on yet.
+The "reply" field is always required.`;
+  }
+
+  return `You are a short-form video script writer helping a builder turn their real work into content for TikTok, Instagram Reels, and YouTube Shorts (60–90 seconds). You also chat with the builder about the script.
 
 ## The builder's week
 ${JSON.stringify(brief, null, 2)}
@@ -42,14 +58,22 @@ CTA (50–60s): One clear action. Options:
 Don't stack multiple CTAs.
 
 ## Output format
-Return ONLY this JSON — no preamble, no markdown fences:
+Return ONLY this JSON — no preamble, no markdown fences, no code blocks:
 {
-  "hook": "spoken text for 0–10s",
-  "middle": "spoken text for 10–50s",
-  "cta": "spoken text for 50–60s"
+  "reply": "Short conversational message to the builder (1–3 sentences). What you did, or your answer if they asked a question.",
+  "script": {
+    "hook": "spoken text for 0–10s",
+    "middle": "spoken text for 10–50s",
+    "cta": "spoken text for 50–60s"
+  }
 }
 
-For follow-up edits (user asks to change something), return the full updated JSON with all three sections — even sections that didn't change.`;
+Rules for the "script" field:
+- On the FIRST message (initial generation request), always include a full script.
+- On follow-ups where the user asks you to CHANGE the content (rewrite hook, tighten middle, swap CTA, etc.), return the full updated script — every section, even unchanged ones.
+- On pure questions where the user is NOT asking to change the script (e.g. "why did you choose that hook?", "what would work for LinkedIn?"), set "script" to null.
+
+The "reply" field is always required.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -57,14 +81,14 @@ export async function POST(req: NextRequest) {
     const body: GenerateRequest = await req.json();
     const { theme, messages, brief } = body;
 
-    if (!theme || !messages || !brief) {
+    if (!messages || messages.length === 0) {
       return new Response(
-        "data: " + JSON.stringify({ error: "Missing required fields" }) + "\n\n",
+        "data: " + JSON.stringify({ error: "Missing messages" }) + "\n\n",
         { status: 400, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
-    const systemPrompt = buildSystemPrompt(brief, theme);
+    const systemPrompt = buildSystemPrompt(brief ?? null, theme ?? null);
 
     const chatMessages = [
       { role: "system" as const, content: systemPrompt },

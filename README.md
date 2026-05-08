@@ -7,8 +7,7 @@ Transform your work activity into short-form video scripts. Reads Claude Code se
 ### Prerequisites
 - Node.js 18+
 - Python 3.8+
-- Ollama (for local Qwen 3 summarization)
-- Anthropic API key (for video script generation)
+- xAI API key (powers both summarization and script generation)
 
 ### 1. Environment Configuration
 
@@ -19,32 +18,22 @@ cp .env.example .env.local
 ```
 
 Required:
-- `ANTHROPIC_API_KEY` — for Claude video script generation
+- `XAI_API_KEY` — for Grok summarization and script generation
 - `CLAUDE_PROJECTS_DIR` — path to your Claude Code projects (usually `~/.claude/projects`)
 - `CONTEXT_DIR` — where to store aggregated data (default: `./context`)
 
-Optional (for Slack integration):
+Optional:
+- `XAI_MODEL` — defaults to `grok-4-fast-non-reasoning`
 - `SLACK_BOT_TOKEN` — Slack bot token (install MCP server first)
 - `SLACK_TEAM_ID` — Slack workspace team ID
 
-### 2. Install Ollama
-
-Download from [ollama.ai](https://ollama.ai). Then pull Qwen 3:
-
-```bash
-ollama pull qwen3:8b
-ollama serve  # Run this in a separate terminal while using EF
-```
-
-Ollama will listen on `http://localhost:11434`. The summarizer will automatically fall back to Claude Haiku if Ollama isn't available.
-
-### 3. Install Dependencies
+### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 4. Optional: Slack Integration
+### 3. Optional: Slack Integration
 
 To enable Slack data ingestion:
 
@@ -70,7 +59,7 @@ Click the **Sync** button to:
 1. Read Claude Code session logs from `~/.claude/projects/`
 2. Fetch recent Slack messages (if configured)
 3. Process Granola exports (if dropped in `context/granola/`)
-4. Summarize everything with Qwen 3 → `context/weekly_brief.json`
+4. Summarize everything with xAI Grok → `context/weekly_brief.json`
 
 ### Create Video Scripts
 
@@ -103,7 +92,7 @@ EF/
 │   │   ├── claude_code.py  → JSONL parser for Claude Code sessions
 │   │   ├── slack.py        → Slack MCP client
 │   │   └── granola.py      → Watched folder processor
-│   └── summarizer.py       → Qwen 3 via Ollama (with Claude Haiku fallback)
+│   └── summarizer.py       → xAI Grok summarization
 └── context/
     ├── sessions/           → Claude Code session markdown files
     ├── slack/              → Slack channel summaries
@@ -145,10 +134,9 @@ StoryboardPanel renders Hook/Middle/CTA
 - Active sessions may have partial JSON on the last line — we safely skip malformed lines.
 - `ai-title` is often absent (~70% of sessions); we fall back to first user message.
 
-### Ollama / Qwen
-- First run downloads ~5GB model (~2-3 min)
-- Summarization typically takes 10-20s on M1/M2
-- Falls back to Claude Haiku if Ollama not running (requires valid `ANTHROPIC_API_KEY`)
+### xAI / Grok
+- Both summarization and script generation use xAI's Grok via the OpenAI-compatible endpoint.
+- Set `XAI_API_KEY` in `.env.local`. Override the model with `XAI_MODEL` if needed.
 
 ### Slack Integration
 - Requires installing `@anthropic-ai/mcp-server-slack` globally

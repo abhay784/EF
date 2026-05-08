@@ -3,25 +3,9 @@
 import { useState, useEffect } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import PreviewPanel from "@/components/PreviewPanel";
-import { ChevronLeft, ChevronRight, Settings, Calendar, Slack, Code } from "@/components/Icons";
+import CodeUploadModal from "@/components/CodeUploadModal";
+import { Settings, Calendar, Slack, Code } from "@/components/Icons";
 import type { WeeklyBrief, VideoScript, Theme } from "@/lib/types";
-
-function getWeekLabel() {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(now.getDate() - now.getDay() + 1);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  const fmt = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const wk = Math.ceil(
-    (now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 604800000
-  );
-  return {
-    range: `${fmt(start)} — ${fmt(end)}`,
-    label: `WK ${wk} · ${now.getFullYear()}`,
-  };
-}
 
 interface TopBarProps {
   brief: WeeklyBrief | null;
@@ -30,11 +14,11 @@ interface TopBarProps {
   slackConnected: boolean;
   slackTeamName: string | null;
   onSlackDisconnect: () => void;
+  onOpenCodeUpload: () => void;
+  uploadCount: number;
 }
 
-function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSlackDisconnect }: TopBarProps) {
-  const { range, label } = getWeekLabel();
-
+function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSlackDisconnect, onOpenCodeUpload, uploadCount }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -52,19 +36,6 @@ function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSla
         >
           for you
         </span>
-      </div>
-
-      <div className="week">
-        <button className="icon-btn">
-          <ChevronLeft size={14} />
-        </button>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.15 }}>
-          <span className="week-label">{label}</span>
-          <span className="week-range">{range}</span>
-        </div>
-        <button className="icon-btn">
-          <ChevronRight size={14} />
-        </button>
       </div>
 
       <div className="top-right">
@@ -94,10 +65,15 @@ function TopBar({ brief, isSyncing, onSync, slackConnected, slackTeamName, onSla
             <span className="pill-dot" />
             <Slack size={11} /> slack
           </button>
-          <span className={"pill" + (!brief ? " warn" : "")}>
+          <button
+            type="button"
+            className={"pill" + (uploadCount === 0 && !brief ? " warn" : "")}
+            onClick={onOpenCodeUpload}
+            title="Click to add Claude/code context (paste or upload .md files)"
+          >
             <span className="pill-dot" />
-            <Code size={11} /> code
-          </span>
+            <Code size={11} /> code{uploadCount > 0 ? ` · ${uploadCount}` : ""}
+          </button>
         </div>
         <button className="sync-btn" onClick={onSync} disabled={isSyncing}>
           {isSyncing ? "Syncing…" : "Sync"}
@@ -119,10 +95,13 @@ export default function StudioPage() {
   const [isRefining, setIsRefining] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
   const [slackTeamName, setSlackTeamName] = useState<string | null>(null);
+  const [codeUploadOpen, setCodeUploadOpen] = useState(false);
+  const [uploadCount, setUploadCount] = useState(0);
 
   useEffect(() => {
     fetchBrief();
     fetchSlackStatus();
+    fetchUploadCount();
     const onMessage = (e: MessageEvent) => {
       if (e.data && e.data.slackConnected) fetchSlackStatus();
     };
@@ -134,6 +113,18 @@ export default function StudioPage() {
       window.removeEventListener("focus", onFocus);
     };
   }, []);
+
+  const fetchUploadCount = async () => {
+    try {
+      const res = await fetch("/api/code/upload");
+      if (res.ok) {
+        const data = await res.json();
+        setUploadCount((data.files || []).length);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const fetchSlackStatus = async () => {
     try {
@@ -213,6 +204,13 @@ export default function StudioPage() {
         slackConnected={slackConnected}
         slackTeamName={slackTeamName}
         onSlackDisconnect={handleSlackDisconnect}
+        onOpenCodeUpload={() => setCodeUploadOpen(true)}
+        uploadCount={uploadCount}
+      />
+      <CodeUploadModal
+        open={codeUploadOpen}
+        onClose={() => setCodeUploadOpen(false)}
+        onSaved={fetchUploadCount}
       />
       <div className="main">
         <ChatPanel
