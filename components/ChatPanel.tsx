@@ -28,10 +28,13 @@ function UserMsg({ children }: { children: React.ReactNode }) {
   );
 }
 
-function renderWithCitations(text: string) {
-  // Convert [source/filename.md] patterns into subtle inline tags.
-  const parts = text.split(/(\[[^\]]+\.md\])/g);
+function renderInline(text: string) {
+  // Render **bold** and [source/file.md] citation tags inline.
+  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\.md\])/g);
   return parts.map((part, i) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
     if (/^\[[^\]]+\.md\]$/.test(part)) {
       return (
         <span
@@ -54,6 +57,49 @@ function renderWithCitations(text: string) {
     }
     return <span key={i}>{part}</span>;
   });
+}
+
+function renderContent(text: string) {
+  // Parse markdown into structured blocks: headings, bullets, plain text.
+  const lines = text.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let bulletBuffer: string[] = [];
+  let key = 0;
+
+  const flushBullets = () => {
+    if (bulletBuffer.length === 0) return;
+    blocks.push(
+      <ul key={key++} style={{ margin: "4px 0 8px", paddingLeft: "1.2em", listStyle: "disc" }}>
+        {bulletBuffer.map((b, i) => (
+          <li key={i} style={{ marginBottom: 4, lineHeight: 1.55 }}>{renderInline(b)}</li>
+        ))}
+      </ul>
+    );
+    bulletBuffer = [];
+  };
+
+  for (const line of lines) {
+    const bulletMatch = line.match(/^[-*]\s+(.*)/);
+    const headingMatch = line.match(/^\*\*(.+)\*\*\s*$/) || line.match(/^##\s+(.*)/);
+    const trimmed = line.trim();
+
+    if (bulletMatch) {
+      bulletBuffer.push(bulletMatch[1]);
+    } else if (headingMatch) {
+      flushBullets();
+      const label = headingMatch[1] ?? headingMatch[2] ?? "";
+      blocks.push(
+        <div key={key++} style={{ fontWeight: 600, fontSize: "12px", color: "var(--ink-2)", marginTop: 10, marginBottom: 2, textTransform: "uppercase", letterSpacing: ".04em" }}>
+          {label}
+        </div>
+      );
+    } else if (trimmed) {
+      flushBullets();
+      blocks.push(<p key={key++} style={{ margin: "4px 0" }}>{renderInline(trimmed)}</p>);
+    }
+  }
+  flushBullets();
+  return blocks;
 }
 
 export default function ChatPanel({ isSyncing }: ChatPanelProps) {
@@ -216,9 +262,7 @@ export default function ChatPanel({ isSyncing }: ChatPanelProps) {
                   <i className="ti" />
                 </span>
               ) : (
-                msg.content.split(/\n{2,}/).map((para, p) => (
-                  <p key={p}>{renderWithCitations(para)}</p>
-                ))
+                renderContent(msg.content)
               )}
             </ClaudeMsg>
           );
