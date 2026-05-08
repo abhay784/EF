@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Weekly — turn your work into short-form",
-  description: "Turn your work week into short-form content",
+  title: "ReCall — for startups",
+  description: "Ask anything about your work — Slack, Granola, code sessions, all searchable.",
 };
 
 export default function RootLayout({

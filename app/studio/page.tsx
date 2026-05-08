@@ -4,42 +4,42 @@ import { useState, useEffect } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import CodeUploadModal from "@/components/CodeUploadModal";
 import GranolaConnectModal from "@/components/GranolaConnectModal";
-import { Calendar, Slack, Code } from "@/components/Icons";
+import { Calendar, Code, Slack } from "@/components/Icons";
 
 interface TopBarProps {
   isSyncing: boolean;
   hasSynced: boolean;
   onSync: () => void;
-  slackConnected: boolean;
-  slackTeamName: string | null;
-  onSlackDisconnect: () => void;
   onOpenCodeUpload: () => void;
   uploadCount: number;
   granolaConnected: boolean;
   granolaOwner: string | null;
   onGranolaConnectClick: () => void;
   onGranolaDisconnect: () => void;
+  slackConnected: boolean;
+  slackTeamName: string | null;
+  onSlackDisconnect: () => void;
 }
 
 function TopBar({
   isSyncing,
   hasSynced,
   onSync,
-  slackConnected,
-  slackTeamName,
-  onSlackDisconnect,
   onOpenCodeUpload,
   uploadCount,
   granolaConnected,
   granolaOwner,
   onGranolaConnectClick,
   onGranolaDisconnect,
+  slackConnected,
+  slackTeamName,
+  onSlackDisconnect,
 }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="brand">
-        <div className="brand-mark">w</div>
-        <span>Weekly</span>
+        <div className="brand-mark">R</div>
+        <span>ReCall</span>
         <span
           style={{
             fontFamily: '"Geist Mono",monospace',
@@ -50,7 +50,7 @@ function TopBar({
             marginLeft: 6,
           }}
         >
-          for you
+          for startup
         </span>
       </div>
 
@@ -115,18 +115,18 @@ function TopBar({
 export default function StudioPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
-  const [slackConnected, setSlackConnected] = useState(false);
-  const [slackTeamName, setSlackTeamName] = useState<string | null>(null);
   const [codeUploadOpen, setCodeUploadOpen] = useState(false);
   const [uploadCount, setUploadCount] = useState(0);
   const [granolaConnectOpen, setGranolaConnectOpen] = useState(false);
   const [granolaConnected, setGranolaConnected] = useState(false);
   const [granolaOwner, setGranolaOwner] = useState<string | null>(null);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeamName, setSlackTeamName] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSlackStatus();
     fetchUploadCount();
     fetchGranolaStatus();
+    fetchSlackStatus();
     const onMessage = (e: MessageEvent) => {
       if (e.data && e.data.slackConnected) fetchSlackStatus();
     };
@@ -255,15 +255,15 @@ export default function StudioPage() {
         isSyncing={isSyncing}
         hasSynced={hasSynced}
         onSync={handleSync}
-        slackConnected={slackConnected}
-        slackTeamName={slackTeamName}
-        onSlackDisconnect={handleSlackDisconnect}
         onOpenCodeUpload={() => setCodeUploadOpen(true)}
         uploadCount={uploadCount}
         granolaConnected={granolaConnected}
         granolaOwner={granolaOwner}
         onGranolaConnectClick={() => setGranolaConnectOpen(true)}
         onGranolaDisconnect={handleGranolaDisconnect}
+        slackConnected={slackConnected}
+        slackTeamName={slackTeamName}
+        onSlackDisconnect={handleSlackDisconnect}
       />
       <CodeUploadModal
         open={codeUploadOpen}

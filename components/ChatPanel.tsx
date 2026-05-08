@@ -220,7 +220,7 @@ export default function ChatPanel({ isSyncing }: ChatPanelProps) {
               <>
                 <div className="brief-headline">Syncing your sources…</div>
                 <p style={{ color: "var(--ink-2)", fontSize: "13.5px" }}>
-                  Reading your Slack, Granola notes, Claude Code sessions, and uploaded files.
+                  Reading your Granola notes, Claude Code sessions, and uploaded files.
                 </p>
                 <span className="typing">
                   <i className="ti" />
@@ -232,7 +232,7 @@ export default function ChatPanel({ isSyncing }: ChatPanelProps) {
               <>
                 <div className="brief-headline">Ask me about your work.</div>
                 <p style={{ color: "var(--ink-2)", fontSize: "13.5px", marginBottom: 6 }}>
-                  I read your Slack, Granola meetings, code sessions, and uploads. Ask things like:
+                  I read your Granola meetings, code sessions, and uploads. Ask things like:
                 </p>
                 <ul style={{ color: "var(--ink-2)", fontSize: "13.5px", paddingLeft: 18, margin: "8px 0 12px" }}>
                   <li>&ldquo;Story with John&rdquo;</li>

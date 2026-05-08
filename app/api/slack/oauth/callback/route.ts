@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { saveInstall } from "@/lib/slackStore";
+
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -12,7 +13,7 @@ export async function GET(req: Request) {
   const clientId = process.env.SLACK_CLIENT_ID;
   const clientSecret = process.env.SLACK_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    return errorPage("SLACK_CLIENT_ID / SLACK_CLIENT_SECRET not set");
+    return errorPage("SLACK_CLIENT_ID / SLACK_CLIENT_SECRET not set on the server");
   }
 
   const redirectUri = `${url.origin}/api/slack/oauth/callback`;
@@ -24,28 +25,34 @@ export async function GET(req: Request) {
     redirect_uri: redirectUri,
   });
 
-  const slackRes = await fetch("https://slack.com/api/oauth.v2.access", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = await slackRes.json();
-
-  if (!data.ok) {
-    return errorPage(`Slack rejected exchange: ${data.error || "unknown"}`);
+  let data: Record<string, unknown>;
+  try {
+    const slackRes = await fetch("https://slack.com/api/oauth.v2.access", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    data = await slackRes.json();
+  } catch (err) {
+    console.error("[slack/oauth] fetch failed", err);
+    return errorPage(`Network error contacting Slack: ${err instanceof Error ? err.message : "unknown"}`);
   }
 
-  const teamId: string = data.team?.id;
-  const teamName: string = data.team?.name || "(unknown)";
+  if (!data.ok) {
+    console.error("[slack/oauth] exchange rejected", data);
+    return errorPage(`Slack rejected exchange: ${(data.error as string) || "unknown"}`);
+  }
 
-  // Prefer user token (xoxp-) so the app reads as the user — no /invite needed.
-  // Fall back to bot token if for some reason only that's present.
-  const userToken: string | undefined = data.authed_user?.access_token;
-  const botToken: string | undefined = data.access_token;
+  const team = (data.team || {}) as { id?: string; name?: string };
+  const authedUser = (data.authed_user || {}) as { id?: string; access_token?: string };
+
+  const teamId = team.id || "";
+  const teamName = team.name || "(unknown)";
+  const userToken = authedUser.access_token;
+  const botToken = (data.access_token as string | undefined) || undefined;
   const accessToken = userToken || botToken;
   const tokenType: "user" | "bot" = userToken ? "user" : "bot";
-  const authedUserId: string = data.authed_user?.id || "";
+  const authedUserId = authedUser.id || "";
 
   if (!teamId || !accessToken) {
     return errorPage(
@@ -53,21 +60,20 @@ export async function GET(req: Request) {
     );
   }
 
-  await saveInstall({
+  const install = {
     teamId,
     teamName,
     accessToken,
     tokenType,
     authedUserId,
     installedAt: new Date().toISOString(),
-  });
+  };
 
   console.log(`[slack/oauth] ✓ Installed ${tokenType} token for "${teamName}" (${teamId}) — authedUser=${authedUserId}`);
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slack connected</title>
 <style>body{font-family:system-ui;max-width:560px;margin:80px auto;padding:0 20px;line-height:1.6;text-align:center}
 .ok{background:#efe;border:1px solid #cfc;padding:24px;border-radius:12px;color:#060}
-.next{margin-top:24px;color:#555;font-size:14px}
 a.btn{display:inline-block;margin-top:20px;padding:10px 18px;background:#000;color:#fff;border-radius:8px;text-decoration:none;font-weight:500}</style>
 </head><body>
 <div class="ok"><h1 style="margin:0 0 8px">Slack connected ✓</h1>
@@ -75,17 +81,32 @@ a.btn{display:inline-block;margin-top:20px;padding:10px 18px;background:#000;col
 <div style="font-size:12px;color:#080;margin-top:8px">Token type: ${tokenType} — ${tokenType === "user" ? "no /invite needed, reads what you can read." : "bot must be invited to channels."}</div></div>
 <a class="btn" href="/studio">Back to studio</a>
 <script>
-  document.cookie = "slack_team_id=${encodeURIComponent(teamId)}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax";
   setTimeout(() => { try { window.opener && window.opener.postMessage({ slackConnected: true, teamId: ${JSON.stringify(teamId)} }, "*"); } catch(e){} }, 100);
 </script>
 </body></html>`;
 
-  return new NextResponse(html, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "set-cookie": `slack_team_id=${encodeURIComponent(teamId)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax; HttpOnly`,
-    },
+  const res = new NextResponse(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
   });
+
+  // Cookies: full install (encoded) + lightweight team_id pointer for backward compatibility
+  const installCookie = Buffer.from(JSON.stringify(install), "utf-8").toString("base64");
+  res.cookies.set("slack_install", installCookie, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true,
+    path: "/",
+    maxAge: COOKIE_MAX_AGE,
+  });
+  res.cookies.set("slack_team_id", teamId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true,
+    path: "/",
+    maxAge: COOKIE_MAX_AGE,
+  });
+
+  return res;
 }
 
 function errorPage(msg: string) {
