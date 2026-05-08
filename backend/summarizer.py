@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from urllib import error, request
 
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-QWEN_MODEL = "qwen3:8b"
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4-fast-non-reasoning")
 XAI_URL = "https://api.x.ai/v1/chat/completions"
@@ -73,6 +71,29 @@ def call_xai(system: str, user_message: str) -> str:
         return response["choices"][0]["message"]["content"]
     except Exception as e:
         raise RuntimeError(f"xAI call failed: {e}")
+def call_xai(system: str, user_message: str) -> str:
+    """Call Grok via xAI's OpenAI-compatible endpoint."""
+    if not XAI_API_KEY:
+        raise RuntimeError("XAI_API_KEY is not set. Add it to .env.local.")
+    response = httpx.post(
+        XAI_URL,
+        headers={
+            "Authorization": f"Bearer {XAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": XAI_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.3,
+            "stream": False,
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
 
 
 def read_all_markdown_sources() -> str:
@@ -84,6 +105,7 @@ def read_all_markdown_sources() -> str:
         ("sessions", "claude_code"),
         ("slack", "slack"),
         ("granola", "granola"),
+        ("uploads", "manual_upload"),
     ]
 
     for subdir, source_type in sources:
@@ -295,18 +317,9 @@ Here is the raw builder activity:
 
 Generate the weekly brief in JSON format."""
 
-    print("  Calling LLM to summarize...")
-    try:
-        raw_response = call_qwen(system_prompt, user_message)
-        print("  ✓ Qwen summarization complete")
-    except RuntimeError as e:
-        print(f"  [warn] {e}")
-        if XAI_API_KEY:
-            print(f"  Falling back to xAI ({XAI_MODEL})...")
-            raw_response = call_xai(system_prompt, user_message)
-            print("  ✓ xAI summarization complete")
-        else:
-            raise
+    print(f"  Calling xAI ({XAI_MODEL}) to summarize...")
+    raw_response = call_xai(system_prompt, user_message)
+    print("  ✓ xAI summarization complete")
 
     json_text = raw_response.strip()
     if json_text.startswith("```"):

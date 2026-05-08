@@ -23,12 +23,9 @@ npm run lint
 # Production
 npm run build && npm start
 
-# Run Python aggregators manually (requires CONTEXT_DIR env var)
+# Run Python aggregators manually (requires CONTEXT_DIR and XAI_API_KEY env vars)
 CONTEXT_DIR=./context python3 backend/aggregator/claude_code.py
-CONTEXT_DIR=./context python3 backend/summarizer.py
-
-# Ollama (must be running for local summarization)
-ollama serve          # Runs on http://localhost:11434
+CONTEXT_DIR=./context XAI_API_KEY=... python3 backend/summarizer.py
 ```
 
 ## Architecture
@@ -41,6 +38,7 @@ The sync flow runs when the user clicks **Sync** in the UI, which hits `POST /ap
 2. `backend/aggregator/slack.py` — fetches messages via `@anthropic-ai/mcp-server-slack` → `context/slack/*.md`
 3. `backend/aggregator/granola.py` — watches `context/granola/` for user-dropped `.md` files
 4. `backend/summarizer.py` — sends all markdown to Qwen 3 via Ollama (fallback: xAI) → `context/weekly_brief.json`
+4. `backend/summarizer.py` — sends all markdown to xAI Grok (OpenAI-compatible endpoint) → `context/weekly_brief.json`
 
 The Next.js API route at `app/api/sync/route.ts` shells out to run these Python scripts.
 
@@ -53,6 +51,13 @@ The Next.js API route at `app/api/sync/route.ts` shells out to run these Python 
 ```
 
 `/api/generate` streams an OpenAI-compatible chat response from xAI via SSE. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context.
+/api/brief  →  ChatPanel (theme chips + chat)
+                   ↓ user picks angle or types in chat
+/api/generate  →  streams JSON {reply, script}
+                   ↓ reply renders in chat, script renders in PreviewPanel
+```
+
+`/api/generate` streams xAI Grok's response via SSE using the `openai` SDK pointed at `https://api.x.ai/v1`. The `GenerateRequest` payload includes the selected `Theme`, full `ChatMessage[]` history, and the `WeeklyBrief` for context. The model returns `{"reply": "...", "script": {hook, middle, cta} | null}` — `script` is null on pure-question follow-ups so the existing draft is preserved.
 
 ### Key Type Contracts (`lib/types.ts`)
 
@@ -70,6 +75,8 @@ Copy `.env.example` → `.env.local`:
 |---|---|---|
 | `XAI_API_KEY` | Yes | xAI API for script generation + summarizer fallback |
 | `XAI_MODEL` | No | xAI model name (default `grok-4-fast-non-reasoning`) |
+| `XAI_API_KEY` | Yes | xAI API key — powers both summarization and script generation |
+| `XAI_MODEL` | No | Defaults to `grok-4-fast-non-reasoning` |
 | `CLAUDE_PROJECTS_DIR` | Yes | Path to `~/.claude/projects` JSONL files |
 | `CONTEXT_DIR` | Yes | Working directory for aggregated data (default `./context`) |
 | `SLACK_BOT_TOKEN` | No | Slack bot token for message ingestion |
@@ -79,5 +86,6 @@ Copy `.env.example` → `.env.local`:
 
 - **Claude Code JSONL**: The directory name at `~/.claude/projects/` encodes the path (lossy). Always use the `cwd` field from individual JSONL records, not the directory name. `ai-title` is absent ~70% of the time — fall back to the first user message.
 - **Ollama**: First run pulls ~5GB Qwen 3 model. Summarization takes 10-20s on Apple Silicon. The summarizer auto-falls back to xAI if Ollama isn't reachable and `XAI_API_KEY` is set.
+- **xAI**: Both `backend/summarizer.py` and `app/api/generate/route.ts` hit `https://api.x.ai/v1`. The summarizer is non-streaming; the generate route streams SSE. No local model is required.
 - **Slack**: The `@anthropic-ai/mcp-server-slack` global package must be installed (`npm install -g`). The bot must be manually invited to each channel.
 - **Granola**: Currently manual — user drops exported `.md` files into `context/granola/`. A direct API integration via MCP is planned but not implemented.
