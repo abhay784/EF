@@ -176,7 +176,7 @@ def run_summarizer():
 
     system_prompt = """You are a storyboard aggregation engine for a builder's weekly work activity.
 
-Your job is to ingest labeled data sources and transform them into 3-5 content themes. Each theme must include a structured narrative storyboard: a clear, ordered chain of events that builds logically from raw code sessions, Slack conversations, and meeting notes.
+Your job is to ingest labeled data sources and transform them into a comprehensive set of content themes covering every interesting thing the builder did that week. Each theme must include a structured narrative storyboard: a clear, ordered chain of events that builds logically from raw code sessions, Slack conversations, and meeting notes.
 
 Input handling rules:
 - Treat each `--- SOURCE: type | filename ---` block as a labeled source.
@@ -187,8 +187,10 @@ Input handling rules:
 - If a source is ambiguous, set `confirmed` to false.
 
 Theme selection rules:
-- Find the 3-5 most interesting things the builder did, figured out, shipped, or decided.
-- Interesting means surprising outcomes, misleading problems, useful decisions, or work other builders would care about.
+- Find every interesting thing the builder did, figured out, shipped, debugged, discussed, planned, decided, learned, documented, or left unresolved that week.
+- Interesting is broad: include not only surprising outcomes, misleading problems, and useful decisions, but also implementation work, product changes, technical investigations, design tradeoffs, workflow improvements, collaboration, recurring friction, open questions, and small but concrete progress.
+- Optimize for full weekly coverage over brevity. Do not stop after a small shortlist if the sources contain more distinct work.
+- Merge duplicate or tightly related events into one theme, but keep separate themes for distinct threads of work even if they seem minor.
 - Keep titles under 8 words.
 - `one_liner` is one sentence describing what happened.
 - `content_angle` is why someone outside the team should care.
