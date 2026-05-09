@@ -34,63 +34,115 @@ function runScript(scriptPath: string, env: Record<string, string | undefined>):
 export async function POST() {
   const cwd = process.cwd();
   const logs: string[] = [];
+  const startedAt = Date.now();
+
+  const ts = () => {
+    const d = new Date();
+    return `[${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, "0")}]`;
+  };
+  const log = (line: string) => logs.push(`${ts()} ${line}\n`);
+  const elapsed = (since: number) => `${((Date.now() - since) / 1000).toFixed(2)}s`;
+
+  log(`▶ sync started (env: ${isReadOnlyFs() ? "vercel/read-only" : "local"})`);
 
   const teamId = cookies().get("slack_team_id")?.value;
+  log(`  · slack cookie team_id: ${teamId ?? "(none)"}`);
   const slackInstall = teamId ? await getInstall(teamId) : null;
+  log(`  · slack install loaded: ${slackInstall ? `team=${slackInstall.teamId}` : "(none)"}`);
   const granola = await getGranolaConnection();
+  log(`  · granola connection: ${granola?.apiKey ? "✓ has api key" : "(none)"}`);
 
-  logs.push(`Starting sync (env: ${isReadOnlyFs() ? "vercel/read-only" : "local"})\n`);
-
-  // ---- Granola: TypeScript aggregator → Supabase Storage ----
+  // ---- Granola ----
+  log("");
+  log("── granola ──");
   if (granola?.apiKey) {
-    const result = await aggregateGranola(granola.apiKey);
-    logs.push(...result.logs.map((l) => l + "\n"));
+    const stepStart = Date.now();
+    log("  fetching notes from Granola API…");
+    let result;
+    try {
+      result = await aggregateGranola(granola.apiKey);
+    } catch (e) {
+      log(`  ✗ aggregator threw: ${e instanceof Error ? e.message : e}`);
+      result = { files: [], logs: [] };
+    }
+    for (const l of result.logs) log(`  ${l}`);
+    log(`  fetched ${result.files.length} note(s) in ${elapsed(stepStart)}`);
+
+    const saveStart = Date.now();
     let saved = 0;
+    let failed = 0;
     for (const file of result.files) {
       try {
         await saveSourceFile("granola", file.name, file.content);
         saved++;
       } catch (e) {
-        logs.push(`[granola] save ${file.name} failed: ${e instanceof Error ? e.message : e}\n`);
+        failed++;
+        log(`  ✗ save ${file.name} failed: ${e instanceof Error ? e.message : e}`);
       }
     }
-    logs.push(`[granola] saved ${saved} files to Supabase Storage\n`);
+    log(`  ✓ saved ${saved}/${result.files.length} files to Supabase (${elapsed(saveStart)})${failed ? ` · ${failed} failed` : ""}`);
   } else {
-    logs.push("[granola] not connected — skipping\n");
+    log("  skipped — not connected");
   }
 
-  // ---- Slack: TypeScript aggregator → Supabase Storage ----
+  // ---- Slack ----
+  log("");
+  log("── slack ──");
   if (slackInstall?.accessToken) {
-    const result = await aggregateSlack(slackInstall.accessToken);
-    logs.push(...result.logs.map((l) => l + "\n"));
+    const stepStart = Date.now();
+    log("  fetching messages via Slack API…");
+    let result;
+    try {
+      result = await aggregateSlack(slackInstall.accessToken);
+    } catch (e) {
+      log(`  ✗ aggregator threw: ${e instanceof Error ? e.message : e}`);
+      result = { files: [], logs: [] };
+    }
+    for (const l of result.logs) log(`  ${l}`);
+    log(`  fetched ${result.files.length} channel file(s) in ${elapsed(stepStart)}`);
+
+    const saveStart = Date.now();
     let saved = 0;
+    let failed = 0;
     for (const file of result.files) {
       try {
         await saveSourceFile("slack", file.name, file.content);
         saved++;
       } catch (e) {
-        logs.push(`[slack] save ${file.name} failed: ${e instanceof Error ? e.message : e}\n`);
+        failed++;
+        log(`  ✗ save ${file.name} failed: ${e instanceof Error ? e.message : e}`);
       }
     }
-    logs.push(`[slack] saved ${saved} files to Supabase Storage\n`);
+    log(`  ✓ saved ${saved}/${result.files.length} files to Supabase (${elapsed(saveStart)})${failed ? ` · ${failed} failed` : ""}`);
   } else {
-    logs.push("[slack] not connected — skipping\n");
+    log("  skipped — not connected");
   }
 
-  // ---- Claude Code sessions: local-only (files live on the user's Mac) ----
+  // ---- Claude Code sessions ----
+  log("");
+  log("── claude_code ──");
   if (!isReadOnlyFs()) {
+    const stepStart = Date.now();
+    log(`  spawning python3 backend/aggregator/claude_code.py (CONTEXT_DIR=${path.join(cwd, "context")})`);
     const env = {
       ...process.env,
       CONTEXT_DIR: path.join(cwd, "context"),
     };
     const result = await runScript(path.join(cwd, "backend", "aggregator", "claude_code.py"), env);
-    logs.push(...result.logs);
+    for (const l of result.logs) {
+      for (const line of l.split("\n").filter(Boolean)) log(`  ${line}`);
+    }
     if (result.code !== 0) {
-      logs.push("[claude_code] script failed (this only runs locally)\n");
+      log(`  ✗ script exited with code ${result.code} (${elapsed(stepStart)})`);
+    } else {
+      log(`  ✓ done in ${elapsed(stepStart)}`);
     }
   } else {
-    logs.push("[claude_code] skipped on Vercel — sessions only exist on your local Mac\n");
+    log("  skipped — Vercel/read-only filesystem (sessions only exist on your local Mac)");
   }
+
+  log("");
+  log(`✓ sync finished in ${elapsed(startedAt)}`);
 
   return NextResponse.json({ ok: true, logs });
 }
