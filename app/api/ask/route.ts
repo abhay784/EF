@@ -83,14 +83,95 @@ async function loadAllSources(): Promise<SourceFile[]> {
   return Array.from(map.values());
 }
 
-function buildCorpus(sources: SourceFile[]): { corpus: string; index: string[] } {
+const STOPWORDS = new Set([
+  "the","a","an","is","are","was","were","be","been","being","of","to","in","on","at","for","with","by","from","as","that","this","these","those","what","when","where","who","whom","why","how","tell","me","about","i","you","my","your","our","we","us","they","them","their","story","summarize","summary","please","pls","just","also","and","or","but","not","no","yes","do","did","does","get","got","make","made","whats","what's","its","it","theme","themes","connection","connections","find","show","give","like","right","now","here","there","some","more","less","very","really","actually","mention","mentions","mentioning",
+]);
+
+function extractKeywords(text: string): string[] {
+  const words = text.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) || [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const w of words) {
+    if (STOPWORDS.has(w)) continue;
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+  }
+  return out;
+}
+
+function scoreSource(s: SourceFile, keywords: string[]): number {
+  if (keywords.length === 0) return 0;
+  const haystack = s.content.toLowerCase();
+  let score = 0;
+  for (const kw of keywords) {
+    let i = 0;
+    let hits = 0;
+    while ((i = haystack.indexOf(kw, i)) !== -1) {
+      hits++;
+      i += kw.length;
+      if (hits >= 5) break;
+    }
+    score += hits;
+  }
+  return score;
+}
+
+const MAX_CORPUS_CHARS = 90_000; // ~25k tokens — keeps Grok responsive (under 10s typical)
+const MAX_PER_SOURCE_CHARS = 8_000; // some session files are 100k+ — truncate so one file doesn't eat the budget
+
+function truncateSource(s: SourceFile, query: string): string {
+  if (s.content.length <= MAX_PER_SOURCE_CHARS) return s.content.trim();
+  // For long files, keep the head + the slice around the first keyword hit (if any).
+  const keywords = extractKeywords(query);
+  const lower = s.content.toLowerCase();
+  let hitIdx = -1;
+  for (const kw of keywords) {
+    const idx = lower.indexOf(kw);
+    if (idx !== -1) {
+      hitIdx = idx;
+      break;
+    }
+  }
+  const head = s.content.slice(0, 2_000).trim();
+  if (hitIdx === -1) {
+    return `${head}\n\n[…truncated, ${s.content.length - 2_000} more chars…]`;
+  }
+  const start = Math.max(2_000, hitIdx - 1_500);
+  const end = Math.min(s.content.length, start + (MAX_PER_SOURCE_CHARS - 2_000));
+  const slice = s.content.slice(start, end).trim();
+  return `${head}\n\n[…jumping to relevant section…]\n\n${slice}\n\n[…end of slice…]`;
+}
+
+function buildCorpus(
+  sources: SourceFile[],
+  query: string
+): { corpus: string; index: string[] } {
+  const keywords = extractKeywords(query);
+  const scored = sources
+    .map((s) => ({ s, score: scoreSource(s, keywords) }))
+    .sort((a, b) => b.score - a.score);
+
+  // Fallback ordering when no keywords matched: prioritize meeting/comms over code logs.
+  const sourcePriority: Record<string, number> = { granola: 0, slack: 1, uploads: 2, code: 3 };
+  if (scored.every((x) => x.score === 0)) {
+    scored.sort((a, b) => (sourcePriority[a.s.source] ?? 9) - (sourcePriority[b.s.source] ?? 9));
+  }
+
   const index: string[] = [];
   const blocks: string[] = [];
-  for (const s of sources) {
+  let total = 0;
+
+  for (const { s, score } of scored) {
     const id = `${s.source}/${s.filename}`;
-    index.push(id);
-    blocks.push(`--- BEGIN SOURCE: ${id} ---\n${s.content.trim()}\n--- END SOURCE: ${id} ---`);
+    const body = truncateSource(s, query);
+    const block = `--- BEGIN SOURCE: ${id} ---\n${body}\n--- END SOURCE: ${id} ---`;
+    if (total + block.length > MAX_CORPUS_CHARS) break;
+    blocks.push(block);
+    index.push(id + (score > 0 ? ` (relevance ${score})` : ""));
+    total += block.length;
   }
+
   return { corpus: blocks.join("\n\n"), index };
 }
 
@@ -98,30 +179,55 @@ function buildSystemPrompt(corpus: string, index: string[]): string {
   const fileList = index.length > 0 ? index.map((f) => `  - ${f}`).join("\n") : "  (no source files yet — user has not synced)";
   return `You are a personal knowledge assistant. The user has Slack, Granola (meeting notes), Claude Code session logs, and manual uploads. Answer questions about their work using ONLY these sources.
 
+## Step 0 — pre-think before writing (silently)
+
+Before answering, do this thinking *silently* (do not show it to the user):
+1. Identify the **subject** of the question (a person, project, topic, decision, time window).
+2. **Find every mention** of that subject across ALL source files. Don't stop at the first match. Search for the name, aliases (first name, last name, email, slack handle), and related concepts.
+3. Group the mentions into **common themes** — recurring topics, shared people, repeated decisions, threads that connect across multiple sources. A theme is something that shows up in 2+ places.
+4. Order them in time. Find the **earliest mention**, the **latest update**, and the **turning points** in between.
+5. Decide what the user actually wants to know — surface the **most useful 1–3 facts**, not everything.
+
+Only after that thinking, write the answer.
+
 ## Length: match the question
 
-This is the most important rule. The user hates walls of text.
+The user hates walls of text. Default to short.
 
-- Direct factual question ("main insight?", "who's John?", "when did we ship?") → **1–3 sentences**. One short paragraph. Stop.
-- List request ("list the bugs", "what features did I ship") → **a tight bulleted list**, no preamble.
-- Recap request ("tell me the story with John", "summarize this week", "give me the full thread") → **3–5 short paragraphs**, narrative prose.
+- Direct factual question ("when did we ship X?", "who's John?", "what's the auth status?") → **1–3 sentences**.
+- List request ("list bugs", "what features shipped") → **tight bulleted list**, no preamble.
+- "Tell me the story with X" / "What's going on with Y" / "Summarize this week" → **the story format below**.
 
-If the question is short, the answer is short. Don't write a five-paragraph essay because the user asked one thing.
+## Story format (when asked about a person, project, or topic)
 
-## Style
+Use this when the user wants the full picture — "story with John", "what's the deal with the auth migration", "tell me about Tyler", "summarize the Granola work".
 
-- Lead with the answer. No "Based on the sources…", no "It seems that…", no scene-setting unless they asked for the story.
-- Cite inline as \`[granola/file.md]\`, \`[slack/file.md]\`, \`[code/file.md]\`. Cite once per claim, not after every sentence.
-- Use specific details (names, numbers, decisions) — that's what makes it feel real.
-- If two sources disagree, say so briefly.
-- Never invent. If the sources don't say it, say "I don't see that in the sources."
+### {Headline that captures the arc} — keep it under 10 words
+
+**TL;DR:** one sentence that sums the whole thing up. The user reads this first and gets the answer immediately.
+
+**Connecting threads:** 2–4 short bullet points naming the **themes that appear across multiple sources**. Each bullet is *what's recurring*, not just one fact. Cite the sources that show the pattern.
+- *Theme name* — short explanation [granola/x.md] [slack/y.md]
+- *Theme name* — short explanation [code/z.md] [granola/w.md]
+
+**Timeline:** 2–4 short prose paragraphs. The actual story across sources, in time order. Earliest mention → middle → most recent. Cite as you go. Use specific details (names, numbers, decisions, dates) — that's what makes it feel real, not a summary.
+
+**What matters most:** one sentence naming the single most important fact or open question. This is what the user should walk away with.
+
+## Hard rules
+
+- **Cross-source linking is mandatory.** If a person/topic appears in both Slack and Granola, the answer MUST connect them. Don't list Slack stuff then Granola stuff — weave them.
+- **Cite inline** as \`[granola/file.md]\`, \`[slack/file.md]\`, \`[code/file.md]\`. One citation per claim, not after every sentence.
+- **No "Based on the sources…"** preambles. No "It seems that…". Lead with the answer.
+- If two sources disagree, name the conflict explicitly: "Slack [slack/x.md] said X but the meeting notes [granola/y.md] decided Y."
+- Never invent. If you don't see something, say "I don't see {X} in the sources" — one line, then stop.
 
 ## When sources are thin
 
-Be honest in one sentence:
-> The only mention of John I see is in [granola/not_x.md] — he was a no-show on May 6.
+If the subject only appears once or twice, write the short version honestly:
+> The only mention of John I see is in [granola/not_x.md] — he was a no-show on May 6 and you discussed pivoting to content strategy.
 
-Don't pad to fill space.
+Don't pad. Don't invent connections that aren't there.
 
 ## Available source files (${index.length} total)
 ${fileList}
@@ -143,10 +249,18 @@ export async function POST(req: NextRequest) {
     }
 
     const sources = await loadAllSources();
-    const { corpus, index } = buildCorpus(sources);
+    // Use the most recent user message + recent context to score sources by relevance.
+    const recentUserText = messages
+      .filter((m) => m.role === "user")
+      .slice(-3)
+      .map((m) => m.content)
+      .join(" ");
+    const { corpus, index } = buildCorpus(sources, recentUserText);
     const systemPrompt = buildSystemPrompt(corpus, index);
 
-    console.log(`[ask] loaded ${sources.length} source files, corpus length=${corpus.length} chars`);
+    console.log(
+      `[ask] ${sources.length} total sources, ${index.length} included (${corpus.length} chars)`
+    );
 
     const chatMessages = [
       { role: "system" as const, content: systemPrompt },
