@@ -119,6 +119,8 @@ def call_xai(system: str, user_message: str) -> str:
                 ],
                 "temperature": 0.3,
                 "stream": False,
+                "max_tokens": 8000,
+                "response_format": {"type": "json_object"},
             },
             headers={
                 "Authorization": f"Bearer {XAI_API_KEY}",

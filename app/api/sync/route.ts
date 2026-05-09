@@ -65,28 +65,13 @@ export async function POST() {
     logs.push(...r2.logs);
     logs.push(...r3.logs);
 
-    if (r1.code !== 0 || r2.code !== 0 || r3.code !== 0) {
-      logs.push(
-        "\n[warn] one or more aggregators failed — proceeding with available data\n"
-      );
+    const failed = [r1, r2, r3].filter((r) => r.code !== 0).length;
+    if (failed > 0) {
+      logs.push(`\n[warn] ${failed} of 3 aggregators failed — proceeding with available data\n`);
     }
 
-    logs.push("\nRunning summarizer...\n");
-
-    // Run summarizer after aggregators
-    const summaryResult = await runScript(
-      path.join(cwd, "backend", "summarizer.py"),
-      env
-    );
-    logs.push(...summaryResult.logs);
-
-    if (summaryResult.code !== 0) {
-      return NextResponse.json(
-        { error: "summarizer failed", logs },
-        { status: 500 }
-      );
-    }
-
+    // Note: summarizer.py is no longer run. /api/ask reads source markdown directly per query,
+    // so the weekly_brief.json step is dead weight.
     return NextResponse.json({ ok: true, logs });
   } catch (error) {
     logs.push(`\n[error] ${error instanceof Error ? error.message : String(error)}`);

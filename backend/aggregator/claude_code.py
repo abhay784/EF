@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 
 def discover_sessions(days_back: int = 7) -> list[dict]:
@@ -36,7 +37,7 @@ def discover_sessions(days_back: int = 7) -> list[dict]:
     return sorted(sessions, key=lambda s: s["mtime"], reverse=True)
 
 
-def parse_session(jsonl_path: Path) -> dict | None:
+def parse_session(jsonl_path: Path) -> Optional[dict]:
     """
     Parse a single JSONL session file into structured data.
     Returns: {session_id, project_path, git_branch, title, start_time, end_time, user_messages, files_touched}
