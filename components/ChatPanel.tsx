@@ -80,22 +80,66 @@ function renderContent(text: string) {
 
   for (const line of lines) {
     const bulletMatch = line.match(/^[-*]\s+(.*)/);
-    const headingMatch = line.match(/^\*\*(.+)\*\*\s*$/) || line.match(/^##\s+(.*)/);
+    const h3Match = line.match(/^###\s+(.*)/);
+    const h2Match = line.match(/^##\s+(.*)/);
+    const labelMatch = line.match(/^\*\*(.+)\*\*\s*$/);
+    const blockquoteMatch = line.match(/^>\s+(.*)/);
     const trimmed = line.trim();
 
     if (bulletMatch) {
       bulletBuffer.push(bulletMatch[1]);
-    } else if (headingMatch) {
+    } else if (h3Match) {
       flushBullets();
-      const label = headingMatch[1] ?? headingMatch[2] ?? "";
+      blocks.push(
+        <h3
+          key={key++}
+          style={{
+            fontFamily: '"Instrument Serif", serif',
+            fontStyle: "italic",
+            fontWeight: 400,
+            fontSize: "22px",
+            lineHeight: 1.2,
+            color: "var(--ink)",
+            margin: "16px 0 10px",
+          }}
+        >
+          {renderInline(h3Match[1])}
+        </h3>
+      );
+    } else if (h2Match) {
+      flushBullets();
+      blocks.push(
+        <h2 key={key++} style={{ fontSize: "16px", fontWeight: 600, margin: "14px 0 8px", color: "var(--ink)" }}>
+          {renderInline(h2Match[1])}
+        </h2>
+      );
+    } else if (labelMatch) {
+      flushBullets();
       blocks.push(
         <div key={key++} style={{ fontWeight: 600, fontSize: "12px", color: "var(--ink-2)", marginTop: 10, marginBottom: 2, textTransform: "uppercase", letterSpacing: ".04em" }}>
-          {label}
+          {labelMatch[1]}
         </div>
+      );
+    } else if (blockquoteMatch) {
+      flushBullets();
+      blocks.push(
+        <blockquote
+          key={key++}
+          style={{
+            margin: "8px 0",
+            padding: "6px 0 6px 12px",
+            borderLeft: "2px solid var(--hair)",
+            color: "var(--ink-2)",
+            fontStyle: "italic",
+            fontSize: "13.5px",
+          }}
+        >
+          {renderInline(blockquoteMatch[1])}
+        </blockquote>
       );
     } else if (trimmed) {
       flushBullets();
-      blocks.push(<p key={key++} style={{ margin: "4px 0" }}>{renderInline(trimmed)}</p>);
+      blocks.push(<p key={key++} style={{ margin: "6px 0", lineHeight: 1.6 }}>{renderInline(trimmed)}</p>);
     }
   }
   flushBullets();

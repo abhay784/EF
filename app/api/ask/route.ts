@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { NextRequest } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { readAllForTarget, type SourceTarget } from "@/lib/supabase/sourceStore";
 
 const client = new OpenAI({
   apiKey: process.env.XAI_API_KEY,
@@ -25,18 +26,17 @@ interface SourceFile {
   content: string;
 }
 
-const SOURCE_DIRS: Array<{ dir: string; source: SourceFile["source"] }> = [
-  { dir: "sessions", source: "code" },
-  { dir: "slack", source: "slack" },
-  { dir: "granola", source: "granola" },
-  { dir: "uploads", source: "uploads" },
-];
+const DIR_TO_SOURCE: Record<string, SourceFile["source"]> = {
+  sessions: "code",
+  slack: "slack",
+  granola: "granola",
+  uploads: "uploads",
+};
 
-async function loadAllSources(): Promise<SourceFile[]> {
+async function loadFromDisk(): Promise<SourceFile[]> {
   const cwd = process.cwd();
   const out: SourceFile[] = [];
-
-  for (const { dir, source } of SOURCE_DIRS) {
+  for (const [dir, source] of Object.entries(DIR_TO_SOURCE)) {
     const fullDir = path.join(cwd, "context", dir);
     let entries: string[];
     try {
@@ -46,17 +46,41 @@ async function loadAllSources(): Promise<SourceFile[]> {
     }
     for (const name of entries) {
       if (!name.endsWith(".md")) continue;
-      const fullPath = path.join(fullDir, name);
       try {
-        const content = await fs.readFile(fullPath, "utf-8");
+        const content = await fs.readFile(path.join(fullDir, name), "utf-8");
         out.push({ source, filename: name, content });
       } catch {
         // skip unreadable
       }
     }
   }
-
   return out;
+}
+
+async function loadFromSupabase(): Promise<SourceFile[]> {
+  const targets: SourceTarget[] = ["uploads", "granola", "slack", "sessions"];
+  const out: SourceFile[] = [];
+  for (const target of targets) {
+    try {
+      const files = await readAllForTarget(target);
+      const source = DIR_TO_SOURCE[target] ?? (target as SourceFile["source"]);
+      for (const f of files) {
+        out.push({ source, filename: f.name, content: f.content });
+      }
+    } catch (err) {
+      console.warn(`[ask] supabase load ${target} failed:`, err);
+    }
+  }
+  return out;
+}
+
+async function loadAllSources(): Promise<SourceFile[]> {
+  // Load from both disk (local) and Supabase (Vercel/shared). De-dupe by source/filename.
+  const [disk, remote] = await Promise.all([loadFromDisk(), loadFromSupabase()]);
+  const map = new Map<string, SourceFile>();
+  for (const f of disk) map.set(`${f.source}/${f.filename}`, f);
+  for (const f of remote) map.set(`${f.source}/${f.filename}`, f);
+  return Array.from(map.values());
 }
 
 function buildCorpus(sources: SourceFile[]): { corpus: string; index: string[] } {
@@ -72,33 +96,38 @@ function buildCorpus(sources: SourceFile[]): { corpus: string; index: string[] }
 
 function buildSystemPrompt(corpus: string, index: string[]): string {
   const fileList = index.length > 0 ? index.map((f) => `  - ${f}`).join("\n") : "  (no source files yet — user has not synced)";
-  return `You are a context extractor. The user has Slack, Granola (meeting notes), Claude Code session logs, and manual uploads. Your job is to pull relevant facts from these sources and present them as grouped bullet points — raw material the user can use to build their own content.
+  return `You are a personal knowledge assistant. The user has Slack, Granola (meeting notes), Claude Code session logs, and manual uploads. Answer questions about their work using ONLY these sources.
 
-Never write prose, narratives, or paragraphs. Always respond in structured bullet points grouped by source.
+## Length: match the question
 
-## Output format
-Always use this structure:
+This is the most important rule. The user hates walls of text.
 
-**[Source label]** (e.g. Claude Code, Slack, Granola, Uploads)
-- Specific fact from that source [source/filename.md]
-- Another specific fact [source/filename.md]
+- Direct factual question ("main insight?", "who's John?", "when did we ship?") → **1–3 sentences**. One short paragraph. Stop.
+- List request ("list the bugs", "what features did I ship") → **a tight bulleted list**, no preamble.
+- Recap request ("tell me the story with John", "summarize this week", "give me the full thread") → **3–5 short paragraphs**, narrative prose.
 
-**Key connections**
-- Cross-source insight connecting two or more sources
+If the question is short, the answer is short. Don't write a five-paragraph essay because the user asked one thing.
 
-Rules:
-- Every bullet is one concrete fact, decision, or moment — under 15 words
-- Cite the source file inline on every bullet: [source/filename.md]
-- Group bullets by source first, then add a "Key connections" section for cross-source links
-- If a source has nothing relevant, omit it entirely
-- If you can't find relevant information, say so in one line and suggest what to sync
-- No introductions, no summaries, no "Based on the sources…" preambles
+## Style
+
+- Lead with the answer. No "Based on the sources…", no "It seems that…", no scene-setting unless they asked for the story.
+- Cite inline as \`[granola/file.md]\`, \`[slack/file.md]\`, \`[code/file.md]\`. Cite once per claim, not after every sentence.
+- Use specific details (names, numbers, decisions) — that's what makes it feel real.
+- If two sources disagree, say so briefly.
+- Never invent. If the sources don't say it, say "I don't see that in the sources."
+
+## When sources are thin
+
+Be honest in one sentence:
+> The only mention of John I see is in [granola/not_x.md] — he was a no-show on May 6.
+
+Don't pad to fill space.
 
 ## Available source files (${index.length} total)
 ${fileList}
 
 ## Source content
-${corpus || "(empty — no sources have been synced yet)"}
+${corpus || "(empty — no sources have been synced yet — tell the user to click Sync)"}
 `;
 }
 
@@ -126,7 +155,7 @@ export async function POST(req: NextRequest) {
 
     const stream = await client.chat.completions.create({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: 1024,
       messages: chatMessages,
       stream: true,
     });

@@ -40,18 +40,6 @@ function TopBar({
       <div className="brand">
         <div className="brand-mark">R</div>
         <span>ReCall</span>
-        <span
-          style={{
-            fontFamily: '"Geist Mono",monospace',
-            fontSize: 11,
-            color: "var(--muted)",
-            letterSpacing: ".04em",
-            textTransform: "uppercase",
-            marginLeft: 6,
-          }}
-        >
-          for startup
-        </span>
       </div>
 
       <div className="top-right">

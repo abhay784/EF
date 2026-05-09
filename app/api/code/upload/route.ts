@@ -1,15 +1,12 @@
+import "server-only";
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
+import { saveSourceFile, listSourceFiles } from "@/lib/supabase/sourceStore";
+
+export const dynamic = "force-dynamic";
 
 interface UploadFile {
-  name: string;
+  name?: string;
   content: string;
-}
-
-function sanitize(name: string): string {
-  const trimmed = name.trim().replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
-  return trimmed || `upload_${Date.now()}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -19,44 +16,19 @@ export async function POST(req: NextRequest) {
     if (files.length === 0) {
       return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
-
-    const uploadsDir = path.join(process.cwd(), "context", "uploads");
-    await fs.mkdir(uploadsDir, { recursive: true });
-
     const written: string[] = [];
     for (const f of files) {
-      if (!f.content || !f.content.trim()) continue;
-      const base = sanitize(f.name || `note_${Date.now()}`);
-      const filename = base.endsWith(".md") ? base : `${base}.md`;
-      const fullPath = path.join(uploadsDir, filename);
-      await fs.writeFile(fullPath, f.content, "utf-8");
-      written.push(filename);
-      console.log(`[code/upload] wrote ${filename} (${f.content.length} chars)`);
+      if (!f.content?.trim()) continue;
+      const { name } = await saveSourceFile("uploads", f.name || `note_${Date.now()}`, f.content);
+      written.push(name);
     }
-
     return NextResponse.json({ ok: true, written });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown error";
-    console.error("[code/upload] failed:", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
 export async function GET() {
-  const uploadsDir = path.join(process.cwd(), "context", "uploads");
-  try {
-    const files = await fs.readdir(uploadsDir);
-    const stats = await Promise.all(
-      files.map(async (name) => {
-        const stat = await fs.stat(path.join(uploadsDir, name));
-        return { name, size: stat.size, mtime: stat.mtime };
-      })
-    );
-    return NextResponse.json({ files: stats });
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return NextResponse.json({ files: [] });
-    }
-    throw err;
-  }
+  const files = await listSourceFiles("uploads");
+  return NextResponse.json({ files });
 }
