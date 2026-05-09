@@ -29,29 +29,45 @@ function UserMsg({ children }: { children: React.ReactNode }) {
 }
 
 function renderInline(text: string) {
-  // Render **bold** and [source/file.md] citation tags inline.
-  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\.md\])/g);
+  // Render **bold**, *italic*, and [source/file.md] citation tags inline.
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\.md\])/g);
   return parts.map((part, i) => {
     if (/^\*\*[^*]+\*\*$/.test(part)) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
+      return <strong key={i} style={{ color: "var(--ink)" }}>{part.slice(2, -2)}</strong>;
+    }
+    if (/^\*[^*\n]+\*$/.test(part)) {
+      return <em key={i} style={{ fontStyle: "italic", color: "var(--ink)" }}>{part.slice(1, -1)}</em>;
     }
     if (/^\[[^\]]+\.md\]$/.test(part)) {
+      const inner = part.slice(1, -1);
+      const sourceKind = inner.split("/")[0];
+      const dotColor: Record<string, string> = {
+        granola: "#6366f1",
+        slack: "#4a154b",
+        code: "#16a34a",
+        uploads: "#d97706",
+      };
       return (
         <span
           key={i}
+          title={inner}
           style={{
-            display: "inline-block",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
             fontFamily: '"Geist Mono", monospace',
-            fontSize: "11px",
+            fontSize: "10px",
             background: "var(--surface)",
             color: "var(--ink-2)",
             padding: "1px 6px",
-            borderRadius: 4,
+            borderRadius: 999,
             margin: "0 2px",
             border: "1px solid var(--hair)",
+            verticalAlign: "1px",
           }}
         >
-          {part.slice(1, -1)}
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor[sourceKind] || "var(--ink-2)" }} />
+          {sourceKind}
         </span>
       );
     }
@@ -69,11 +85,45 @@ function renderContent(text: string) {
   const flushBullets = () => {
     if (bulletBuffer.length === 0) return;
     blocks.push(
-      <ul key={key++} style={{ margin: "4px 0 8px", paddingLeft: "1.2em", listStyle: "disc" }}>
-        {bulletBuffer.map((b, i) => (
-          <li key={i} style={{ marginBottom: 4, lineHeight: 1.55 }}>{renderInline(b)}</li>
-        ))}
-      </ul>
+      <div
+        key={key++}
+        style={{
+          margin: "12px 0",
+          padding: "12px 14px",
+          background: "var(--surface)",
+          border: "1px solid var(--hair)",
+          borderLeft: "3px solid var(--ink)",
+          borderRadius: 8,
+        }}
+      >
+        <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+          {bulletBuffer.map((b, i) => (
+            <li
+              key={i}
+              style={{
+                position: "relative",
+                paddingLeft: 18,
+                marginBottom: i === bulletBuffer.length - 1 ? 0 : 8,
+                lineHeight: 1.5,
+                fontSize: "13.5px",
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: "0.55em",
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--ink)",
+                }}
+              />
+              {renderInline(b)}
+            </li>
+          ))}
+        </ul>
+      </div>
     );
     bulletBuffer = [];
   };
@@ -275,15 +325,51 @@ export default function ChatPanel({ isSyncing }: ChatPanelProps) {
             ) : (
               <>
                 <div className="brief-headline">Ask me about your work.</div>
-                <p style={{ color: "var(--ink-2)", fontSize: "13.5px", marginBottom: 6 }}>
-                  I read your Granola meetings, code sessions, and uploads. Ask things like:
+                <p style={{ color: "var(--ink-2)", fontSize: "13.5px", marginBottom: 10 }}>
+                  I read your Granola meetings, code sessions, and uploads. Try one of these:
                 </p>
-                <ul style={{ color: "var(--ink-2)", fontSize: "13.5px", paddingLeft: 18, margin: "8px 0 12px" }}>
-                  <li>&ldquo;Story with John&rdquo;</li>
-                  <li>&ldquo;What did I ship this week?&rdquo;</li>
-                  <li>&ldquo;Who&apos;s been blocking the auth migration?&rdquo;</li>
-                  <li>&ldquo;Summarize Tuesday&apos;s meetings&rdquo;</li>
-                </ul>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "4px 0 14px" }}>
+                  {[
+                    {
+                      title: "Tell me the story of this week",
+                      hint: "A narrative recap across meetings, calls, and code — who I talked to, what I shipped, where it stands now.",
+                      prompt:
+                        "Tell me the story of this week. Who did I meet with, what came out of those conversations, and what did I ship in code? Connect the threads — make it read like a story.",
+                    },
+                    {
+                      title: "Story of my biggest meeting",
+                      hint: "The conversation that shaped this week the most — context, the turn, where it left off.",
+                      prompt:
+                        "Tell me the story of the most important meeting from this week. Who was there, what was the real thread, what got decided, and what's still open?",
+                    },
+                    {
+                      title: "Story of the one thing I should follow up on",
+                      hint: "The thing hiding in the sources that I'd regret missing — with the receipts.",
+                      prompt:
+                        "Looking across my meetings and work this week, what's the one thing I most need to follow up on? Tell me the story behind it — why it matters, who's waiting, and what should I do next.",
+                    },
+                  ].map((s) => (
+                    <button
+                      key={s.title}
+                      type="button"
+                      onClick={() => !isLoading && sendMessage(s.prompt)}
+                      disabled={isLoading}
+                      style={{
+                        textAlign: "left",
+                        padding: "10px 12px",
+                        border: "1px solid var(--hair)",
+                        borderRadius: 10,
+                        background: "var(--surface)",
+                        cursor: isLoading ? "default" : "pointer",
+                        font: "inherit",
+                        color: "inherit",
+                      }}
+                    >
+                      <div style={{ fontSize: "13.5px", fontWeight: 500, marginBottom: 2 }}>{s.title}</div>
+                      <div style={{ fontSize: "12px", color: "var(--ink-2)", lineHeight: 1.45 }}>{s.hint}</div>
+                    </button>
+                  ))}
+                </div>
                 <p style={{ color: "var(--ink-2)", fontSize: "12px" }}>
                   Hit <strong>Sync</strong> first to refresh sources, then ask anything.
                 </p>
