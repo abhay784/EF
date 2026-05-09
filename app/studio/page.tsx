@@ -227,12 +227,27 @@ export default function StudioPage() {
 
   const handleSync = async () => {
     setIsSyncing(true);
+    const t0 = performance.now();
+    console.groupCollapsed(`[sync] running…`);
     try {
       const res = await fetch("/api/sync", { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      console.log("[sync]", data);
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+      console.log(`[sync] HTTP ${res.status} in ${elapsed}s — ok=${data.ok}`);
+      if (Array.isArray(data.logs)) {
+        for (const line of data.logs) {
+          const trimmed = String(line).replace(/\n$/, "");
+          if (trimmed.includes("[err]") || trimmed.includes("✗")) console.warn(trimmed);
+          else console.log(trimmed);
+        }
+      } else {
+        console.log("[sync] full payload:", data);
+      }
       setHasSynced(true);
+    } catch (e) {
+      console.error("[sync] request failed:", e);
     } finally {
+      console.groupEnd();
       setIsSyncing(false);
     }
   };
